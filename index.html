@@ -184,6 +184,21 @@
   .sky .mute { box-shadow: inset -1px -1px 0 0 var(--bev-lo), inset 1px 1px 0 0 var(--bev-hi); }
 
   /* ---------------- Jev 面板 ---------------- */
+  .jev-sum { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 2px 8px; }
+  .jev-sum .k { font-size: 11px; color: var(--muted); letter-spacing: .06em; }
+  .jev-sum b { font: 700 21px/1.25 var(--sans); }
+  .jev-sum b.thr { color: var(--pink); }
+  .jev-sum .p { font: 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  /* 面板默认收着：一局里真正要看的只有「它猜你出什么、它出什么」两行，
+     概率条和 state 原文是想深究时才展开的东西。 */
+  .fold { margin-top: 10px; border-top: 1px dotted var(--bev-lo); padding-top: 7px; }
+  .fold > summary { cursor: pointer; font-size: 11.5px; color: var(--muted); list-style: none; }
+  .fold > summary::-webkit-details-marker { display: none; }
+  .fold > summary::before { content: "▸ "; }
+  .fold[open] > summary::before { content: "▾ "; }
+  .fold > summary:hover { color: var(--ink); }
+  .fold-body { margin-top: 9px; }
+
   .bar-row { display: grid; grid-template-columns: 44px 1fr 42px; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 7px; }
   .bar-row .k { color: var(--muted); }
   .bar-row .v { text-align: right; font-variant-numeric: tabular-nums; }
@@ -225,6 +240,20 @@
   .banner.err { background: var(--pink); color: #1E1E1E; }
   .foot { margin-top: 16px; font-size: 11.5px; color: var(--muted); line-height: 1.9; }
   .foot code { background: var(--face); padding: 1px 5px; }
+
+  /* 怎么说话——这句话得显眼。放在 PLAY.EXE 里、按钮正下方，做成 Win95 的状态栏，
+     左边压一条粉色。之前缩在页面最底下的灰色小字里，没人会看见。 */
+  .howto {
+    margin-top: 14px; padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
+    font-size: 13px; background: var(--face); color: var(--ink);
+    border-left: 5px solid var(--pink);
+    box-shadow: inset -1px -1px 0 0 var(--bev-hi), inset 1px 1px 0 0 var(--bev-lo2);
+  }
+  .howto .tag { font-size: 10px; letter-spacing: .14em; padding: 3px 6px 2px;
+                background: var(--ink); color: var(--paper); }
+  .howto .say { font: 700 13.5px/1.4 var(--mono); white-space: nowrap; }
+  .howto .say i { font: 400 11.5px var(--mono); font-style: normal; color: var(--muted); margin-left: 4px; }
+  .howto .sep { color: var(--muted); opacity: .5; }
   .status-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; background: var(--face-low); }
   .status-dot.ok { background: var(--pink); }
   .status-dot.off { background: var(--bev-lo2); }
@@ -260,6 +289,14 @@
         </div>
         <div class="transcript" id="transcript"></div>
         <div class="controls" id="controls"></div>
+        <div class="howto">
+          <span class="tag">这样说</span>
+          <span class="say">「开始」<i>开局</i></span>
+          <span class="sep">·</span>
+          <span class="say">「石头剪刀布」<i>再喊你出的那一手</i></span>
+          <span class="sep">·</span>
+          <span class="say">「再来一个回合」<i>清空历史重开</i></span>
+        </div>
       </div>
     </section>
 
@@ -308,6 +345,8 @@
     jevError: null,
     jevPending: false,
     jevStarted: 0,
+    goAt: 0,                // 「出拳！」那一下是什么时候画的
+    jevOpen: false,         // 用户自己拉开过「Jev 的判断」没有
     deadline: 30,
     transcript: "",
     listening: false,
@@ -321,21 +360,49 @@
   // 至今是零外部依赖的，为三声「嘀」破例去放一个 mp3 不划算。
   const sfx = (() => {
     let ctxAudio = null;
+    let master = null;          // 总音量。静音就把它按到 0，已经排出去的音也会立刻哑掉。
     let muted = false;
+
     function ensure() {
-      if (muted) return null;
       if (!ctxAudio) {
         const Ctor = window.AudioContext || window.webkitAudioContext;
         if (!Ctor) return null;
         try { ctxAudio = new Ctor(); } catch (e) { return null; }
+        master = ctxAudio.createGain();
+        master.gain.value = muted ? 0 : 1;
+        master.connect(ctxAudio.destination);
       }
       // 浏览器要求先有一次用户手势，否则 AudioContext 是 suspended 的。
       if (ctxAudio.state === "suspended") ctxAudio.resume().catch(() => {});
       return ctxAudio;
     }
-    function beep(freq, ms, gain, type, to) {
+
+    // 只有真在跑的上下文才发得出声。suspended 的时候 currentTime 是冻住的，
+    // 这时候排进去的音会全挤在同一个时刻，等某次点击把上下文解开时一起炸出来 ——
+    // 那正是「音效和数字错开」最难看的样子，所以宁可这一轮先不出声。
+    function running() {
       const ac = ensure();
-      if (!ac) return;
+      return ac && ac.state === "running" ? ac : null;
+    }
+
+    // 声音从「排进音频线程」到真的从扬声器出来，中间隔着一整段设备延迟：
+    // 有线几十毫秒，蓝牙耳机常有一两百毫秒。数字是按下发那一刻画的，
+    // 于是耳朵听到的那一声总落在眼睛看到数字之后 —— 听着就是「音效慢一拍」。
+    // 提前发声做不到（声音只能往后排），所以把这个数字报给画数字的人，
+    // 让他把数字也往后挪到同一刻。
+    function lagMs() {
+      if (!ctxAudio || ctxAudio.state !== "running") return 0;
+      // 只信「像样」的 outputLatency。实测这台机器上的 Chrome 会报 2.008 秒 ——
+      // 查不到真实设备时它就是这么个数。照它去挪数字，数字会凭空晚 300 毫秒，
+      // 那就不是修错位，是制造错位了。不可信的报值退回到 baseLatency（5.8ms）。
+      const out = ctxAudio.outputLatency;
+      const s = (out > 0 && out <= 0.25) ? out : (ctxAudio.baseLatency || 0);
+      return Math.round(Math.max(0, Math.min(0.30, s)) * 1000);
+    }
+
+    function beep(freq, ms, gain, type, to) {
+      const ac = running();
+      if (!ac) return 0;
       const t = ac.currentTime;
       const osc = ac.createOscillator();
       const amp = ac.createGain();
@@ -344,17 +411,29 @@
       if (to) osc.frequency.linearRampToValueAtTime(to, t + ms / 1000);
       amp.gain.setValueAtTime(gain, t);
       amp.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
-      osc.connect(amp); amp.connect(ac.destination);
+      osc.connect(amp); amp.connect(master);
       osc.start(t); osc.stop(t + ms / 1000 + 0.02);
+      return lagMs();
     }
+
     return {
       unlock() { ensure(); },
       isMuted() { return muted; },
-      toggle() { muted = !muted; if (!muted) ensure(); return muted; },
-      // 3 / 2 / 1：短促清脆的一声。
-      tick() { beep(1046, 70, 0.05, "square"); },
-      // 数到 0：低一点、长一点，给个「开始」的感觉。
-      go() { beep(523, 190, 0.06, "square", 784); },
+      toggle() {
+        muted = !muted;
+        if (master) master.gain.value = muted ? 0 : 1;
+        if (!muted) ensure();
+        return muted;
+      },
+      lagMs,
+      // 第一次交互时先把音频设备叫醒：刚建出来的 AudioContext 要过一两百毫秒才
+      // 真的出得了声（蓝牙设备更久），第一声「嘀」就卡在这段启动时间里 ——
+      // 那正是「数字画完了声音才响」的来源。放一个听不见的极短音把它顶出来。
+      warm() { beep(1760, 12, 0.0008, "sine"); },
+      // 3 / 2 / 1：短促清脆的一声。返回值是「这一声还要过多久才进到耳朵里」。
+      tick() { return beep(1046, 70, 0.05, "square"); },
+      // 数到 0：低一点、长一点，给个「出拳」的感觉。
+      go() { return beep(523, 190, 0.06, "square", 784); },
       win() { beep(659, 110, 0.055, "triangle"); setTimeout(() => beep(988, 190, 0.055, "triangle"), 110); },
       lose() { beep(330, 130, 0.055, "triangle"); setTimeout(() => beep(208, 240, 0.055, "triangle"), 130); },
       tie() { beep(440, 170, 0.05, "triangle"); },
@@ -416,7 +495,9 @@
 
     if (state.phase === "countdown") {
       el.innerHTML =
-        '<div class="countdown beat" id="count-num">' + state.count + "</div>" +
+        (state.count
+          ? '<div class="countdown beat" id="count-num">' + state.count + "</div>"
+          : '<div class="countdown" style="font-size:46px; color:var(--ink); text-shadow:none;">准备…</div>') +
         '<div class="stage-line">说「石头剪刀布」，再喊你出的那一手<br>' +
         (state.userThrow
           ? '已听到：<b>' + LABEL[state.userThrow] + "</b>"
@@ -427,7 +508,10 @@
     if (state.phase === "waiting") {
       const waitingForJev = !state.jev && !state.jevError;
       const waited = state.jevStarted ? ((Date.now() - state.jevStarted) / 1000).toFixed(0) : "0";
+      // 数到 0 的那一声也配一个字：不然它就是一声没有数字对应的响。
+      const fresh = state.goAt && Date.now() - state.goAt < 900;
       el.innerHTML =
+        (fresh ? '<div class="countdown beat" style="font-size:52px;">出拳！</div>' : "") +
         '<div class="versus">' +
           handHTML("you", state.userThrow, "你") +
           '<div class="vs">VS</div>' +
@@ -496,26 +580,37 @@
       "<dt>出" + LABEL[thr] + "</dt><dd>" +
       (d.expected[thr] >= 0 ? "+" : "−") + Math.abs(d.expected[thr]).toFixed(2) + "</dd>").join("");
 
+    // 一眼要看到的就是这两行，剩下的都收进下面那个 fold 里。
     el.innerHTML =
-      '<div class="bars-row">' + rows + "</div>" +
-      '<div class="stage-line" style="color:var(--dim); font-size:13px;">' +
-        "它认为你会出 <b>" + LABEL[order[0]] + "</b>（" + pct(d.probabilities[order[0]]) + "%）<br>" +
-        "所以它出 <b style=\"color:var(--accent)\">" + LABEL[d.throw] + "</b>" +
+      '<div class="jev-sum">' +
+        '<span class="k">它猜你出</span><b>' + LABEL[order[0]] + "</b>" +
+          '<span class="p">' + pct(d.probabilities[order[0]]) + "%</span>" +
+        '<span class="k">它出</span><b class="thr">' + LABEL[d.throw] + "</b><span></span>" +
       "</div>" +
-      '<dl class="kv" style="margin-top:14px;">' + evRows + "</dl>" +
-      '<div class="note">上面是每手的<b>期望净胜分</b>（赢的概率 − 输的概率），取最高的一手出拳。' +
-        "Jev 只负责说出它对你下一手的判断，出拳在规则内算出来 —— 这样它越是确定，出的拳就越是能赢你。" +
-      "</div>" +
-      (d.direct
-        ? '<div class="note">顺带问它「你自己出什么」，它答的是 <b>' + LABEL[d.direct] + "</b>，" +
-          (d.agrees ? "这次和算出来的那一手一致。" : "这次和算出来的那一手<b>不一致</b>。") +
-          " 实测它这一问并不可靠，所以没让它决定出拳。</div>"
-        : "") +
-      '<details><summary>Jev 收到的 state 原文</summary><pre>' + esc(d.state) + "</pre></details>" +
+      '<details class="fold" id="jev-fold"' + (state.jevOpen ? " open" : "") + ">" +
+        "<summary>每手的概率 · 期望净胜分 · 它收到的 state 原文</summary>" +
+        '<div class="fold-body">' +
+          '<div class="bars-row">' + rows + "</div>" +
+          '<dl class="kv">' + evRows + "</dl>" +
+          '<div class="note">上面是每手的<b>期望净胜分</b>（赢的概率 − 输的概率），取最高的一手出拳。' +
+            "Jev 只负责说出它对你下一手的判断，出拳在规则内算出来 —— 这样它越是确定，出的拳就越是能赢你。" +
+          "</div>" +
+          (d.direct
+            ? '<div class="note">顺带问它「你自己出什么」，它答的是 <b>' + LABEL[d.direct] + "</b>，" +
+              (d.agrees ? "这次和算出来的那一手一致。" : "这次和算出来的那一手<b>不一致</b>。") +
+              " 实测它这一问并不可靠，所以没让它决定出拳。</div>"
+            : "") +
+          '<details><summary>state 原文</summary><pre>' + esc(d.state) + "</pre></details>" +
+        "</div>" +
+      "</details>" +
       '<div class="note">' + esc(d.model) + " · " +
         (d.cached ? "缓存命中" : "延迟 " + d.latency_ms + "ms") +
         (d.usage ? " · " + d.usage.input_tokens + " in / " + d.usage.output_tokens + " out" : "") +
       "</div>";
+
+    // 重画的时候用 state.jevOpen 记住用户自己拉开过没有，别替他关上。
+    const fold = $("jev-fold");
+    if (fold) fold.addEventListener("toggle", () => { state.jevOpen = fold.open; });
   }
 
   function renderMemory() {
@@ -570,42 +665,60 @@
   }
 
   function renderFoot() {
-    const bits = [];
-    bits.push(state.asr === "browser"
+    // 「怎么说」已经搬进 PLAY.EXE 里了，这里只留语音接线的状态。
+    $("foot").innerHTML = (state.asr === "browser"
       ? '<span class="status-dot ok"></span>语音识别：浏览器内置（Web Speech）'
       : state.asr === "server"
         ? '<span class="status-dot ok"></span>语音识别：服务器端命令'
-        : '<span class="status-dot warn"></span>语音识别不可用 —— 用下面或右边的按钮手动出拳');
-    bits.push("说「开始」开局 · 说「石头剪刀布」+ 出拳 · 说「再来一个回合」清空历史");
-    $("foot").innerHTML = bits.join("<br>");
+        : '<span class="status-dot warn"></span>语音识别不可用 —— 用下面的按钮手动出拳');
   }
 
   // ---------------------------------------------------------------- 一局
+  // 数字和声音必须同一刻到。响一声是立刻的，但那一声要过一段设备延迟才真的从
+  // 扬声器出来（见 sfx.lagMs：有线几十毫秒，蓝牙耳机一两百毫秒），而屏幕是马上
+  // 画的 —— 于是耳朵听到的总落在眼睛看到数字之后。声音没法提前，那就让数字等：
+  // 先响，等这一声进到耳朵里，再把数字画出来。
+  function beat(paint, sound) {
+    const lag = sound() || 0;
+    if (!lag) { paint(); return; }
+    setTimeout(paint, lag);
+  }
+
   function startCountdown() {
     if (state.phase !== "idle") return;
     state.phase = "countdown";
-    state.count = 3;
+    state.count = null;              // 先「准备…」，第一个数字等到它的声音一起出现
+    state.goAt = 0;
     state.userThrow = null;
     state.jev = null;
     state.jevError = null;
     state.jevPending = true;
     state.transcript = "";
     render();
-    sfx.tick();                       // 「3」
-
     askJev();                        // 和倒计时并排跑，别让它拖后腿
+
+    beat(() => { if (state.phase === "countdown") { state.count = 3; renderStage(); } },
+         sfx.tick);                  // 「3」
+
+    let left = 3;
     const timer = setInterval(() => {
-      state.count -= 1;
-      if (state.count > 0) {
-        sfx.tick();                   // 「2」「1」
-        renderStage();
+      left -= 1;
+      if (left > 0) {
+        beat(() => { if (state.phase === "countdown") { state.count = left; renderStage(); } },
+             sfx.tick);              // 「2」「1」
         return;
       }
       clearInterval(timer);
-      sfx.go();                       // 数到 0
-      state.phase = "waiting";
-      render();
-      maybeFinish();
+      // 数到 0：这一声配上「出拳！」，它就不再是一声孤零零的响。
+      beat(() => {
+        if (state.phase !== "countdown") return;
+        state.count = 0;
+        state.phase = "waiting";
+        state.goAt = Date.now();
+        render();
+        maybeFinish();
+        setTimeout(() => { if (state.phase === "waiting") renderStage(); }, 900);
+      }, sfx.go);
     }, 1000);
   }
 
@@ -1001,7 +1114,7 @@
     muteBtn.textContent = muted ? "♪ 关" : "♪ 开";
   };
   ["pointerdown", "keydown"].forEach((ev) =>
-    addEventListener(ev, () => sfx.unlock(), { once: true }));
+    addEventListener(ev, () => { sfx.unlock(); sfx.warm(); }, { once: true }));
   // 先问服务器认不认语音，再决定走哪条路；两条都不通就只剩按钮。
   fetch("/api/health")
     .then((r) => r.json())
