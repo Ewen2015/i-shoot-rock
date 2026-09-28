@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>I Shoot Rock</title>
+<style>
+  :root {
+    --ink: #e9eef5;
+    --dim: #8a93a3;
+    --accent: #ffd166;
+    --danger: #ef476f;
+    --bg: #0b0f16;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: radial-gradient(120% 90% at 50% 0%, #16202f 0%, var(--bg) 60%);
+    color: var(--ink);
+    font: 15px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", Segoe UI, Roboto, sans-serif;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .wrap {
+    position: relative;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+  }
+  canvas {
+    width: min(100%, 860px);
+    height: auto;
+    aspect-ratio: 3 / 2;
+    border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.06);
+    cursor: crosshair;
+    touch-action: none;
+  }
+  .hud {
+    position: absolute;
+    inset: 16px 16px auto 16px;
+    max-width: 860px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    pointer-events: none;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .02em;
+  }
+  .hud b { color: var(--accent); font-weight: 600; }
+  .hint {
+    position: absolute;
+    bottom: 22px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: var(--dim);
+    font-size: 13px;
+  }
+  kbd {
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.14);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: 1px 6px;
+    font: inherit;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hud">
+    <div>SCORE <b id="score">0</b></div>
+    <div>BEST <b id="best">0</b></div>
+    <div>LIVES <b id="lives">3</b></div>
+  </div>
+  <canvas id="game" width="1200" height="800" aria-label="I Shoot Rock game canvas"></canvas>
+  <div class="hint">Move to aim &middot; <kbd>click</kbd> / <kbd>space</kbd> to shoot &middot; <kbd>P</kbd> pause</div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width;
+  const H = canvas.height;
+
+  const ui = {
+    score: document.getElementById("score"),
+    best: document.getElementById("best"),
+    lives: document.getElementById("lives"),
+  };
+
+  const BEST_KEY = "i-shoot-rock:best";
+
+  const ROCKS = [
+    { r: 46, hp: 3, points: 30, fill: "#9aa7bd", edge: "#dbe3ef", speed: 0.5 },
+    { r: 30, hp: 2, points: 20, fill: "#8a97ad", edge: "#c8d2e0", speed: 0.68 },
+    { r: 21, hp: 1, points: 10, fill: "#78849a", edge: "#b3bdcd", speed: 0.9 },
+  ];
+
+  const state = {
+    mode: "title", // title | playing | paused | over
+    score: 0,
+    best: Number(localStorage.getItem(BEST_KEY) || 0),
+    lives: 3,
+    time: 0,
+    spawnTimer: 0,
+    spawnEvery: 1.6,
+    rocks: [],
+    bullets: [],
+    sparks: [],
+    shake: 0,
+    crosshair: { x: W / 2, y: H * 0.7 },
+    cooldown: 0,
+  };
+
+  ui.best.textContent = state.best;
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  function syncHud() {
+    ui.score.textContent = state.score;
+    ui.lives.textContent = state.lives;
+    ui.best.textContent = state.best;
+  }
+
+  function reset() {
+    state.score = 0;
+    state.lives = 3;
+    state.time = 0;
+    state.spawnTimer = 0.9;
+    state.spawnEvery = 1.6;
+    state.rocks = [];
+    state.bullets = [];
+    state.sparks = [];
+    state.shake = 0;
+    state.cooldown = 0;
+    syncHud();
+  }
+
+  function start() {
+    reset();
+    state.mode = "playing";
+  }
+
+  function gameOver() {
+    state.mode = "over";
+    if (state.score > state.best) {
+      state.best = state.score;
+      localStorage.setItem(BEST_KEY, String(state.best));
+    }
+    syncHud();
+  }
+
+  function spawnRock() {
+    const type = ROCKS[Math.floor(Math.random() * ROCKS.length)];
+    // Difficulty ramps gently for the first 40 seconds.
+    const ramp = Math.min(1, state.time / 40);
+    const r = type.r * rand(0.85, 1.15);
+    state.rocks.push({
+      x: rand(r + 20, W - r - 20),
+      y: -r - 10,
+      vx: rand(-40, 40) * (0.5 + ramp),
+      vy: rand(48, 86) * type.speed * (0.9 + ramp * 1.6),
+      r,
+      hp: type.hp,
+      maxHp: type.hp,
+      points: type.points,
+      fill: type.fill,
+      edge: type.edge,
+      spin: rand(-1, 1),
+      angle: rand(0, Math.PI * 2),
+      hit: 0,
+      shape: Array.from({ length: 9 }, () => rand(0.82, 1.14)),
+    });
+  }
+
+  function shoot(x, y) {
+    if (state.mode !== "playing" || state.cooldown > 0) return;
+    state.cooldown = 0.11;
+    const from = { x: W / 2, y: H + 6 };
+    const dx = x - from.x;
+    const dy = y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    state.bullets.push({
+      x: from.x,
+      y: from.y,
+      vx: (dx / len) * 1500,
+      vy: (dy / len) * 1500,
+      life: 1.1,
+      px: from.x,
+      py: from.y,
+    });
+    state.shake = Math.min(6, state.shake + 2.4);
+  }
+
+  function burst(x, y, color, count, power) {
+    for (let i = 0; i < count; i++) {
+      const a = rand(0, Math.PI * 2);
+      const s = rand(40, 210) * power;
+      state.sparks.push({
+        x, y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s,
+        life: rand(0.25, 0.7),
+        max: 0.7,
+        size: rand(1.6, 4.2),
+        color,
+      });
+    }
+  }
+
+  function damageRock(rock, x, y) {
+    rock.hp -= 1;
+    rock.hit = 0.12;
+    burst(x, y, rock.edge, 6, 0.7);
+    if (rock.hp > 0) return;
+
+    state.score += rock.points;
+    burst(rock.x, rock.y, rock.fill, 18, 1.15);
+    state.shake = Math.min(12, state.shake + 5);
+    state.spawnEvery = Math.max(0.55, state.spawnEvery - 0.008);
+    rock.dead = true;
+    syncHud();
+  }
+
+  function update(dt) {
+    state.time += dt;
+    state.shake = Math.max(0, state.shake - dt * 26);
+    state.cooldown = Math.max(0, state.cooldown - dt);
+
+    if (state.mode !== "playing") return;
+
+    state.spawnTimer -= dt;
+    if (state.spawnTimer <= 0) {
+      state.spawnTimer = state.spawnEvery * rand(0.75, 1.25);
+      spawnRock();
+      if (state.time > 14 && Math.random() < 0.28) spawnRock();
+    }
+
+    for (const b of state.bullets) {
+      b.px = b.x;
+      b.py = b.y;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.life -= dt;
+      if (b.x < -40 || b.x > W + 40 || b.y < -40 || b.y > H + 40) b.dead = true;
+    }
+
+    for (const rock of state.rocks) {
+      rock.hit = Math.max(0, rock.hit - dt);
+      rock.angle += rock.spin * dt;
+      rock.vy += 32 * dt;
+      rock.x += rock.vx * dt;
+      rock.y += rock.vy * dt;
+      if (rock.x < rock.r) { rock.x = rock.r; rock.vx = Math.abs(rock.vx); }
+      if (rock.x > W - rock.r) { rock.x = W - rock.r; rock.vx = -Math.abs(rock.vx); }
+      if (rock.y - rock.r > H) {
+        rock.dead = true;
+        state.lives -= 1;
+        state.shake = Math.min(14, state.shake + 8);
+        burst(rock.x, H - 6, "#ef476f", 14, 0.9);
+        syncHud();
+        if (state.lives <= 0) gameOver();
+      }
+    }
+
+    // Bullet / rock collisions.
+    for (const b of state.bullets) {
+      if (b.dead) continue;
+      for (const rock of state.rocks) {
+        if (rock.dead) continue;
+        if (Math.hypot(b.x - rock.x, b.y - rock.y) <= rock.r) {
+          b.dead = true;
+          damageRock(rock, b.x, b.y);
+          break;
+        }
+      }
+    }
+
+    for (const s of state.sparks) {
+      s.life -= dt;
+      s.vy += 420 * dt;
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      if (s.life <= 0) s.dead = true;
+    }
+
+    state.rocks = state.rocks.filter((r) => !r.dead);
+    state.bullets = state.bullets.filter((b) => !b.dead);
+    state.sparks = state.sparks.filter((s) => !s.dead);
+  }
+
+  function drawRock(rock) {
+    const scale = 1 + rock.hit * 1.6;
+    ctx.save();
+    ctx.translate(rock.x, rock.y);
+    ctx.rotate(rock.angle);
+    ctx.scale(scale, scale);
+    ctx.beginPath();
+    const n = rock.shape.length;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const rr = rock.r * rock.shape[i];
+      const px = Math.cos(a) * rr;
+      const py = Math.sin(a) * rr;
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(-rock.r, -rock.r, rock.r, rock.r);
+    grad.addColorStop(0, rock.edge);
+    grad.addColorStop(1, rock.fill);
+    ctx.fillStyle = rock.hit > 0 ? "#ffffff" : grad;
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(11,15,22,.55)";
+    ctx.stroke();
+
+    // Craters
+    ctx.fillStyle = "rgba(11,15,22,.20)";
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 + 0.6;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * rock.r * 0.42, Math.sin(a) * rock.r * 0.42, rock.r * 0.16, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    if (rock.maxHp > 1 && rock.hp < rock.maxHp) {
+      const w = rock.r * 1.7;
+      const x = rock.x - w / 2;
+      const y = rock.y - rock.r - 14;
+      ctx.fillStyle = "rgba(255,255,255,.14)";
+      ctx.fillRect(x, y, w, 5);
+      ctx.fillStyle = "#ffd166";
+      ctx.fillRect(x, y, w * (rock.hp / rock.maxHp), 5);
+    }
+  }
+
+  function drawCrosshair() {
+    const { x, y } = state.crosshair;
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,209,102,.9)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, 16, 0, Math.PI * 2);
+    ctx.moveTo(x - 26, y); ctx.lineTo(x - 8, y);
+    ctx.moveTo(x + 8, y); ctx.lineTo(x + 26, y);
+    ctx.moveTo(x, y - 26); ctx.lineTo(x, y - 8);
+    ctx.moveTo(x, y + 8); ctx.lineTo(x, y + 26);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawGround() {
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,.06)";
+    ctx.fillRect(0, H - 8, W, 8);
+    ctx.font = "600 22px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(255,255,255,.09)";
+    ctx.textAlign = "center";
+    ctx.fillText("I  S H O O T  R O C K", W / 2, H - 26);
+    ctx.restore();
+  }
+
+  function drawTitleCard(title, lines) {
+    ctx.save();
+    ctx.fillStyle = "rgba(8,11,17,.72)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffd166";
+    ctx.font = "700 74px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillText(title, W / 2, H / 2 - 40);
+    ctx.fillStyle = "#e9eef5";
+    ctx.font = "400 27px ui-sans-serif, system-ui, sans-serif";
+    lines.forEach((line, i) => ctx.fillText(line, W / 2, H / 2 + 34 + i * 40));
+    ctx.restore();
+  }
+
+  function render() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    if (state.shake > 0) {
+      ctx.translate(rand(-state.shake, state.shake), rand(-state.shake, state.shake));
+    }
+
+    // Backdrop stars
+    ctx.fillStyle = "rgba(255,255,255,.10)";
+    for (let i = 0; i < 46; i++) {
+      const x = ((i * 137) % W);
+      const y = ((i * 271) % (H - 40));
+      ctx.fillRect(x, y, 2, 2);
+    }
+
+    drawGround();
+    for (const rock of state.rocks) drawRock(rock);
+
+    for (const b of state.bullets) {
+      ctx.strokeStyle = "rgba(255,209,102,.85)";
+      ctx.lineWidth = 5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(b.px, b.py);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+
+    for (const s of state.sparks) {
+      ctx.globalAlpha = Math.max(0, s.life / s.max);
+      ctx.fillStyle = s.color;
+      ctx.fillRect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size);
+    }
+    ctx.globalAlpha = 1;
+
+    if (state.mode === "playing" || state.mode === "paused") drawCrosshair();
+
+    if (state.mode === "title") {
+      drawTitleCard("I Shoot Rock", [
+        "Smash every rock before it hits the ground.",
+        "Click or press Space to fire.",
+        "",
+        "Click to begin",
+      ]);
+    } else if (state.mode === "paused") {
+      drawTitleCard("Paused", ["Press P to resume"]);
+    } else if (state.mode === "over") {
+      drawTitleCard("Game Over", [
+        `Score ${state.score}  ·  Best ${state.best}`,
+        "",
+        "Click or press Space to play again",
+      ]);
+    }
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  function pointerToCanvas(evt) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((evt.clientX - rect.left) / rect.width) * W,
+      y: ((evt.clientY - rect.top) / rect.height) * H,
+    };
+  }
+
+  canvas.addEventListener("pointermove", (evt) => {
+    const p = pointerToCanvas(evt);
+    state.crosshair.x = p.x;
+    state.crosshair.y = p.y;
+  });
+
+  canvas.addEventListener("pointerdown", (evt) => {
+    evt.preventDefault();
+    const p = pointerToCanvas(evt);
+    state.crosshair.x = p.x;
+    state.crosshair.y = p.y;
+    if (state.mode === "playing") shoot(p.x, p.y);
+    else if (state.mode === "title" || state.mode === "over") start();
+    else if (state.mode === "paused") state.mode = "playing";
+  });
+
+  window.addEventListener("keydown", (evt) => {
+    if (evt.code === "Space") {
+      evt.preventDefault();
+      if (state.mode === "playing") shoot(state.crosshair.x, state.crosshair.y);
+      else if (state.mode === "title" || state.mode === "over") start();
+      else if (state.mode === "paused") state.mode = "playing";
+    } else if (evt.key === "p" || evt.key === "P") {
+      if (state.mode === "playing") state.mode = "paused";
+      else if (state.mode === "paused") state.mode = "playing";
+    } else if (evt.key === "Escape" && state.mode === "paused") {
+      state.mode = "playing";
+    }
+  });
+
+  window.addEventListener("blur", () => {
+    if (state.mode === "playing") state.mode = "paused";
+  });
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
