@@ -15,6 +15,8 @@
     POST /api/interpret    一句话 -> 指令/出拳（语音识别之后的解析）
     POST /api/asr          音频 -> 文字（需要配 I_SHOOT_ROCK_ASR_CMD，见 docs/speech.md）
     GET  /api/health       密钥在不在、ASR 通没通、有没有命中缓存
+    GET  /api/settings     密钥填了没有、来自哪里、前后四位（从来不是 key 本身）
+    POST /api/settings     在页面上填 key：{jev_api_key, test} -> 状态，同样不含 key
 
 只有标准库，不需要 pip install。
 """
@@ -39,6 +41,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import game
+import settings
 
 # 代码在 src/，页面在 web/，缓存落在 var/（仓库根下，已 gitignore）。
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -63,6 +66,10 @@ CACHE_OFF = ("", "0", "off", "no", "false")
 CACHE_PATH = (os.environ.get("I_SHOOT_ROCK_CACHE_PATH")
               or os.path.join(ROOT, "var", "i_shoot_rock.jevcache.db"))
 ASR_ENV = "I_SHOOT_ROCK_ASR_CMD"
+
+# 「设置」这个窗口的读-改-写要串起来：两个请求同时进来，后一个不能把前一个
+# 刚写进去的字段抹掉。整个服务器只有这一件事需要锁。
+SETTINGS_LOCK = threading.Lock()
 
 MAX_BODY = 32 * 1024 * 1024
 STATIC = {"index.html": "text/html; charset=utf-8"}
@@ -137,29 +144,34 @@ def storable(response):
 # Jev
 # --------------------------------------------------------------------------- #
 def api_key():
-    for name in ("JEV_API_KEY", "TYPESAFE_API_KEY"):
-        value = os.environ.get(name)
-        if value:
-            return value.strip()
-    return None
+    """现在生效的密钥：页面「设置」里填的优先，其次才是环境变量。
+
+    优先级只有 settings 那一处实现，这里只是给它一个本地的名字 —— 这个函数在
+    这个文件里被问得太多了，值得短一点。
+    """
+    return settings.key_value("jev_api_key")
 
 
 class JevError(RuntimeError):
     pass
 
 
-def ask_jev(state, key, model=MODEL, budget=None):
+def ask_jev(state, key, model=MODEL, budget=None, use_cache=True):
     """问一次 Jev。返回 (response, latency_ms, cached)。
 
     重试受总预算约束：`budget` 秒之内要么拿到答案，要么抛错。这是刻意的 ——
     调用方是等在一局游戏中间的真人。
+
+    `use_cache=False` 是给「测试密钥」用的：那一次必须真的打到上游，命中的
+    缓存证明不了这个 key 还有效。
     """
     body = json.dumps({"state": state, "model": model, "questions": game.question()},
                       ensure_ascii=False).encode("utf-8")
 
-    hit = CACHE.get(body)
-    if hit is not None:
-        return hit, 0, True
+    if use_cache:
+        hit = CACHE.get(body)
+        if hit is not None:
+            return hit, 0, True
 
     budget = DEADLINE if budget is None else budget
     started = time.time()
@@ -176,7 +188,8 @@ def ask_jev(state, key, model=MODEL, budget=None):
         try:
             with urllib.request.urlopen(request, timeout=min(TIMEOUT, left)) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-            CACHE.put(body, payload)
+            if use_cache:
+                CACHE.put(body, payload)
             return payload, int((time.time() - started) * 1000), False
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:300]
@@ -208,6 +221,48 @@ def decide(history, key, model=MODEL):
         "tally": game.tally(history),
     })
     return decided
+
+
+# --------------------------------------------------------------------------- #
+# 设置（密钥）
+# --------------------------------------------------------------------------- #
+def check_key(budget=15):
+    """一次真的调用，换回「这个 key 现在到底能不能用」。
+
+    走的是游戏真正走的那条路：一份最小的 state（空历史）、同一个问题、同一套解析。
+    能换回一个出拳，就说明 key、网络、模型三样都对得上 —— 比只检查「key 长得像
+    不像」多花了几个 token，但那几个 token 买的是确定性。
+
+    自己吞掉异常：这个窗口是用来修问题的，它自己不能变成一个新的问题。
+    """
+    key = api_key()
+    if not key:
+        return {"ok": False, "detail": "还没有 key —— 填一个，或者设环境变量 %s"
+                                       % " / ".join(settings.ENV_NAMES["jev_api_key"])}
+    try:
+        response, _latency, _cached = ask_jev(game.build_state([]), key, budget=budget,
+                                              use_cache=False)
+        decided = game.decide_from_answers(response.get("answers"))
+    except JevError as exc:
+        return {"ok": False, "detail": str(exc)[:200]}
+    except Exception as exc:  # noqa: BLE001 - 这里失败也只是「不通」，不该把窗口打掉
+        return {"ok": False, "detail": ("%s: %s" % (type(exc).__name__, exc))[:200]}
+    return {"ok": True, "detail": "有回应（model=%s，它出 %s）"
+                                  % (response.get("model") or MODEL, game.LABEL[decided["throw"]])}
+
+
+def handle_settings(body):
+    """存下用户在页面上填的 key。返回的只有状态，永远不是 key 本身。
+
+    `test` 和保存是同一次请求，所以两者不会错位：测试跑的一定是刚写进去的那份。
+    """
+    patch = settings.patch_from(body)
+    if patch:
+        settings.save(patch)
+    result = {"settings": settings.key_status()}
+    if body.get("test"):
+        result["test"] = check_key()
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -312,7 +367,11 @@ class Handler(BaseHTTPRequestHandler):
                 "deadline": DEADLINE,
                 "asr": "command" if asr_available() else ("configured-but-missing" if asr_command() else "none"),
                 "cache": CACHE.enabled(),
+                # 布尔值和来源，永远不是 key。页面用它决定「设置」窗口里显示什么。
+                "settings": settings.key_status(),
             })
+        if path == "/api/settings":
+            return self.send_json({"settings": settings.key_status()})
         if path == "/favicon.ico":
             # 浏览器一定会来要它；给个空 204，免得控制台一直挂一个 404。
             self.send_response(204)
@@ -352,11 +411,24 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"error": "%s: %s" % (type(exc).__name__, exc)}, 500)
 
     def route_post(self, path):
+        # 读-改-写密钥文件是这里唯一需要串行的事：别的请求彼此无关（一次出拳就是
+        # 一次独立的判断），不用排队。
+        if path in ("/api/settings", "/api/settings/test"):
+            with SETTINGS_LOCK:
+                if path == "/api/settings":
+                    return self.send_json(handle_settings(self.read_json()))
+                return self.send_json({"settings": settings.key_status(), "test": check_key()})
+
         if path == "/api/decide":
             key = api_key()
             if not key:
                 return self.send_json(
-                    {"error": "没有找到 Jev 密钥。请 export JEV_API_KEY=... 后重启服务器。"}, 503)
+                    {
+                        "error": "服务器还没有 Jev 密钥：点页面上的「设置」填一个，"
+                                 "或者 export JEV_API_KEY=… 后重启服务器。",
+                        # 页面拿它把「没有密钥」变成一个可以点的动作，而不是一条死胡同。
+                        "settings": settings.key_status(),
+                    }, 503)
             payload = self.read_json()
             model = (payload.get("model") or MODEL).strip() or MODEL
             return self.send_json(decide(payload.get("history"), key, model))
@@ -380,9 +452,12 @@ def self_check():
     """`--check`：不发音频、不猜，只确认密钥能不能真的换回一个出拳。"""
     key = api_key()
     if not key:
-        print("✗ 没有找到 JEV_API_KEY 或 TYPESAFE_API_KEY")
+        print("✗ 没有找到密钥：页面的「设置」里可以填，也可以 export %s"
+              % settings.ENV_NAMES["jev_api_key"][0])
         return 1
-    print("· 密钥已读到（%s…%s）" % (key[:4], key[-4:]))
+    print("· 密钥已读到：来自%s（%s）"
+          % ("设置文件" if settings.key_source("jev_api_key") == "settings" else "环境变量",
+             settings.mask(key)))
     try:
         result = decide([{"user": "rock", "jev": "scissors"}] * 3, key)
     except JevError as exc:
@@ -408,13 +483,17 @@ def main():
     if args.check:
         return self_check()
 
-    if not api_key():
-        print("! 没有 JEV_API_KEY / TYPESAFE_API_KEY：页面能开，但每次出拳都会失败。")
-
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.daemon_threads = True
     print("石头剪刀布 · 对 Jev  ->  http://%s:%d" % (args.host, args.port))
-    print("  Jev   %s   %s" % (MODEL, "密钥已就绪" if api_key() else "缺少密钥"))
+    print("  Jev   %s" % MODEL)
+    if api_key():
+        print("  密钥  %s（%s）"
+              % ("来自设置文件" if settings.key_source("jev_api_key") == "settings" else "来自环境变量",
+                 settings.mask(api_key())))
+    else:
+        print("! 还没有密钥：页面能开，点右上角的「设置」填一个就能玩"
+              "（或 export %s 后重启）。" % settings.ENV_NAMES["jev_api_key"][0])
     print("  语音   %s" % ("识别命令已配置" if asr_available() else "未配置（浏览器语音或手动出拳）"))
     print("  缓存   %s" % ("开" if CACHE.enabled() else "关"))
     try:

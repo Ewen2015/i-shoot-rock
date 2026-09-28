@@ -10,10 +10,11 @@ web/index.html  ──HTTP──>  src/server.py  ──HTTPS──>  api.typesa
 | 路径 | 职责 |
 | --- | --- |
 | `src/game.py` | 纯逻辑：规则、交给 Jev 的 `state` 原文、从信念到出拳的算术、语音文本解析 |
-| `src/server.py` | 本地服务器：代理 Jev、识别转发、静态页面、缓存 |
+| `src/server.py` | 本地服务器：代理 Jev、识别转发、静态页面、缓存、设置接口 |
+| `src/settings.py` | 密钥的来源与优先级，以及落盘那一个文件该有的样子 |
 | `web/index.html` | 页面，单文件零外部依赖：倒计时与音效、牌桌、记忆、语音接线 |
-| `tests/` | 上面两个 Python 文件的测试，不联网 |
-| `var/` | 运行时产物（识别的本地缓存），已 gitignore |
+| `tests/` | 上面三个 Python 文件的测试，不联网 |
+| `var/` | 运行时产物（识别的本地缓存、密钥文件），已 gitignore |
 
 ## 逻辑层为什么单独一层
 
@@ -37,14 +38,25 @@ Jev 仍然看不到你出了什么。
 
 ## 密钥边界
 
-- 密钥只在服务器进程里，浏览器只跟 `127.0.0.1` 说话，页面拿不到 key。
+- 密钥有两个来源，**页面填的优先**：`var/i_shoot_rock.settings.json`（权限 0600），
+  然后是 `JEV_API_KEY` / `TYPESAFE_API_KEY`。文件优先是因为在页面上按一次保存是一个
+  看得见结果的主动动作；让它悄悄输给某个忘掉的 `export`，是那种要花一小时才查出来的事。
+- **key 从来不回浏览器。** `GET /api/settings` 回答的是「填了没有、来自哪里、前后四位」；
+  `POST /api/settings` 收下新值、回一份同样的状态。写文件走临时文件加 rename，
+  且只有这一处的读-改-写需要上锁。
+- 浏览器只跟 `127.0.0.1` 说话，带 key 的那一次请求从服务器发出去。
 - 历史只存在浏览器内存里，刷新页面就没了 —— 没有做持久化。
+
+「保存并测试」是同一次请求：测试跑的必然是刚写进去的那份，两者不会错位。测试本身是
+一次真实调用（最小的一份 `state`、绕开缓存）—— 命中的缓存证明不了 key 还有效；代价是
+几个 token，换的是「到底通不通」这件事的确定性。
 
 ## 测试
 
 ```bash
-python3 tests/test_game.py && python3 tests/test_server.py
+python3 tests/test_game.py && python3 tests/test_server.py && python3 tests/test_settings.py
 ```
 
-79 个：`game.py` 56 个纯逻辑（不联网、不需要密钥），`server.py` 23 个（网络被替换掉，
-含重试预算、缓存、以及不联网的那部分 HTTP 层）。
+113 个：`game.py` 56 个纯逻辑（不联网、不需要密钥），`server.py` 33 个（网络被替换掉，
+含重试预算、缓存、密钥来源与「测试」那一下），`settings.py` 24 个（优先级、0600、
+以及「key 不出现在任何一份状态里」）。

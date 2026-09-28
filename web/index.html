@@ -228,8 +228,8 @@
   @media (prefers-color-scheme: dark) { button.primary:hover:not(:disabled) { background: #fff; color: #000; } }
   button.throw { min-width: 78px; line-height: 1.25; }
   button.throw .g { display: block; font: 700 17px var(--sans); color: var(--pink); }
-  .mute { margin-left: 8px; padding: 5px 9px; font-size: 11px; }
-  .sky .mute { box-shadow: inset -1px -1px 0 0 var(--bev-lo), inset 1px 1px 0 0 var(--bev-hi); }
+  .mute, .sky-btn { margin-left: 8px; padding: 5px 9px; font-size: 11px; }
+  .sky .mute, .sky .sky-btn { box-shadow: inset -1px -1px 0 0 var(--bev-lo), inset 1px 1px 0 0 var(--bev-hi); }
 
   /* ---------------- Jev 面板 ---------------- */
   .jev-sum { display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: 2px 8px; }
@@ -288,6 +288,41 @@
   .banner.err { background: var(--pink); color: #1E1E1E; }
   .foot { margin-top: 16px; font-size: 11.5px; color: var(--muted); line-height: 1.9; }
   .foot code { background: var(--face); padding: 1px 5px; }
+  .foot a, .banner a { color: inherit; }
+
+  /* ---------------- 设置 ---------------- */
+  /* 密钥只在服务端有一个落点，这个窗口是它的门：页面从来读不回 key，
+     所以这里能显示的只有「填了没有、来自哪里、前后四位」。做成一个盖住
+     全屏的 Win95 对话框，而不是页面上的第三栏 —— 它是偶尔用一次的东西，
+     不该和牌桌抢位置。 */
+  .modal {
+    position: fixed; inset: 0; z-index: 40; padding: 18px;
+    display: grid; place-items: center; background: rgba(30, 30, 30, .42);
+  }
+  .modal.hidden { display: none; }
+  .hidden { display: none !important; }
+  .dialog { width: min(560px, 100%); max-height: 88vh; overflow: auto; }
+  /* 标题栏那三个控制格默认是画的、不接事件（它们只是窗框的一部分）；
+     这个窗口是真的能关的，所以只有一个 × 需要接。 */
+  .dialog .tb-ctrls { pointer-events: auto; }
+  .dialog .tb-close { cursor: pointer; }
+  .dialog .tb-close:hover { background: var(--pink); }
+  .dialog label { display: block; font-size: 11.5px; color: var(--muted); margin: 0 0 5px; letter-spacing: .04em; }
+  .dialog input {
+    width: 100%; font: 12.5px var(--mono); color: var(--ink); background: var(--field);
+    border: 0; padding: 8px 9px;
+    box-shadow: inset 1px 1px 0 0 var(--bev-lo2), inset -1px -1px 0 0 var(--bev-hi);
+  }
+  .dialog input:focus { outline: 1px dotted var(--ink); outline-offset: -4px; }
+  .set-state { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+  .set-state.on { color: var(--ink); }
+  .set-state.warn { color: var(--pink); }
+  .verdict-line { display: flex; gap: 8px; align-items: baseline; font-size: 12px; margin-top: 9px; }
+  .verdict-line .k { min-width: 42px; font-weight: 700; }
+  .verdict-line .dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; background: var(--face-low); }
+  .verdict-line .dot.ok { background: var(--pink); }
+  .verdict-line .dot.bad { background: var(--ink); }
+  .verdict-line .warn { color: var(--pink); }
 
   /* 怎么说话——这句话得显眼。放在 PLAY.EXE 里、按钮正下方，做成 Win95 的状态栏，
      左边压一条粉色。之前缩在页面最底下的灰色小字里，没人会看见。 */
@@ -319,6 +354,7 @@
       <div class="chip"><b id="score-jev">0</b><span>JEV</span></div>
       <div class="chip"><b id="round-count">0</b><span>回合</span></div>
       <button class="mute" id="btn-mute" title="倒计时音效">♪ 开</button>
+      <button class="sky-btn" id="btn-settings" title="配置 Jev API key">设置</button>
     </div>
   </div>
 </div>
@@ -371,6 +407,40 @@
   <div class="foot" id="foot"></div>
 </div>
 
+<!-- 设置：key 的最后落点是服务端的一个 0600 文件，这个窗口只知道「填了没有」。 -->
+<div class="modal hidden" id="settings-modal">
+  <section class="win dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="titlebar">
+      <span class="tb-text" id="settings-title">设置 — SETTINGS.EXE</span>
+      <span class="tb-ctrls">
+        <i class="tb-close" id="settings-close" role="button" tabindex="0" title="关闭">×</i>
+      </span>
+    </div>
+    <div class="win-body">
+      <p class="note" style="margin-top:0">
+        填好的 key 存在服务端的 <code id="set-file">var/i_shoot_rock.settings.json</code>（权限 0600），
+        <b>这里填的优先于环境变量</b>。这个页面只知道「填了没有」和前后四位 ——
+        读取接口从来不会把 key 送回来，所以刷新页面不必担心它留在 DOM 里。
+      </p>
+
+      <div style="margin-top:14px">
+        <label for="set-key">Jev · System One · 判断</label>
+        <input id="set-key" type="password" autocomplete="off" spellcheck="false"
+               placeholder="粘贴 Jev API key（留空并保存 = 清除）">
+        <div class="set-state" id="set-state">—</div>
+      </div>
+
+      <div class="controls" style="justify-content:flex-start; margin-top:16px">
+        <button class="primary" id="set-save">保存并测试</button>
+        <button id="set-test">只测试现有的</button>
+        <button id="set-clear">清除文件里的 key</button>
+      </div>
+      <div class="note" id="set-msg"></div>
+      <div id="set-test-out"></div>
+    </div>
+  </section>
+</div>
+
 <script>
 (() => {
   "use strict";
@@ -407,6 +477,7 @@
     asr: "none",            // browser | server | none
     micReady: false,
     netError: null,
+    keyConfigured: true,    // 服务器读没读到密钥；false 时提示里给一个能点的「去设置」
   };
 
   // ---------------------------------------------------------------- 音效
@@ -756,7 +827,11 @@
   function renderBanner() {
     const el = $("banner");
     if (state.netError) {
-      el.innerHTML = '<div class="banner err">' + esc(state.netError) + "</div>";
+      // 密钥缺失是最常见的失败，而它离「修好」只有一次点击 —— 所以给这个点击，
+      // 而不是只把问题念一遍。（链接的点击由下面设置那一段里挂的代理接。）
+      el.innerHTML = '<div class="banner err">' + esc(state.netError)
+        + (state.keyConfigured ? "" : ' <a href="#" id="banner-settings">→ 去填 API key</a>')
+        + "</div>";
       return;
     }
     el.innerHTML = "";
@@ -768,7 +843,8 @@
       ? '<span class="status-dot ok"></span>语音识别：浏览器内置（Web Speech）'
       : state.asr === "server"
         ? '<span class="status-dot ok"></span>语音识别：服务器端命令'
-        : '<span class="status-dot warn"></span>语音识别不可用 —— 用下面的按钮手动出拳');
+        : '<span class="status-dot warn"></span>语音识别不可用 —— 用下面的按钮手动出拳')
+      + ' · <a href="#" id="foot-settings">设置 API key</a>';
   }
 
   // ---------------------------------------------------------------- 一局
@@ -826,6 +902,8 @@
         signal: controller.signal,
       });
       const data = await res.json();
+      // 503 的响应里带着密钥的状态：页面因此能把「没有密钥」变成一个可以点的动作。
+      if (data.settings) applyKeyStatus(data.settings);
       if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
       state.jev = data;
       state.netError = null;
@@ -1226,6 +1304,116 @@
   };
   setJevPanelOpen(false);
 
+  /* ---------------------------------------------------------------- 设置
+     key 只在服务端落一个文件（0600），这个窗口从来读不回它：/api/settings 回答的
+     是「填了没有、来自哪里、前后四位」。存过之后输入框清空，每次打开也清一次 ——
+     上一次粘进去的值要么已经存下（下面那行会说它现在在哪），要么就是被放弃了；
+     没有第三种可能，所以留着它只会让人以为还有效。 */
+  const SOURCE_ZH = { settings: "设置文件", env: "环境变量" };
+
+  // 服务器说密钥现在能不能用。翻转成「能」的时候顺手把那条「没有密钥」的提示撤掉，
+  // 否则牌桌还停在一个已经修好的错误上。
+  function applyKeyStatus(s) {
+    if (!s || !s.jev_api_key) return;
+    const before = state.keyConfigured;
+    state.keyConfigured = !!s.jev_api_key.configured;
+    if (!before && state.keyConfigured && state.netError) {
+      state.netError = null;
+      renderBanner();
+    }
+  }
+
+  function describeKey(entry) {
+    if (!entry || !entry.configured) {
+      return "还没有 —— 请求会失败，先填一个，或设环境变量 <b>"
+        + esc(entry ? entry.env_hint : "") + "</b>";
+    }
+    return "正在用 <b>" + esc(SOURCE_ZH[entry.source] || entry.source) + "</b> 的 key"
+      + (entry.hint ? "（" + esc(entry.hint) + "）" : "");
+  }
+
+  function renderSettings(s) {
+    const el = $("set-state");
+    // 路径是服务器报上来的真值（可以用 I_SHOOT_ROCK_SETTINGS 换），不是写死的那个默认值。
+    $("set-file").textContent = s.file || $("set-file").textContent;
+    el.innerHTML = describeKey(s.jev_api_key);
+    el.className = "set-state" + (s.jev_api_key.configured ? " on" : " warn");
+    // 只有落在文件里的 key 能从这里清掉；环境变量是 shell 的事 —— 说明白，
+    // 比给一个按下去什么也不做的按钮好。
+    $("set-clear").classList.toggle("hidden", s.jev_api_key.source !== "settings");
+  }
+
+  function renderTest(test) {
+    if (!test) { $("set-test-out").innerHTML = ""; return; }
+    $("set-test-out").innerHTML = '<div class="verdict-line">'
+      + '<span class="k"><span class="dot ' + (test.ok ? "ok" : "bad") + '"></span>Jev</span>'
+      + "<span" + (test.ok ? "" : ' class="warn"') + ">"
+      + esc(test.detail || "—") + "</span></div>";
+  }
+
+  function openSettings() {
+    renderTest(null);
+    $("set-msg").textContent = "";
+    $("set-key").value = "";
+    $("settings-modal").classList.remove("hidden");
+    $("set-key").focus();
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => { renderSettings(data.settings); applyKeyStatus(data.settings); })
+      .catch(() => {
+        $("set-msg").innerHTML = '<span class="warn">读不到当前状态 —— 服务器还在跑吗？</span>';
+      });
+  }
+
+  function closeSettings() { $("settings-modal").classList.add("hidden"); }
+
+  function settingsPost(payload, label) {
+    $("set-msg").textContent = label;
+    return fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).then((r) => r.json()
+      .then((data) => ({ ok: r.ok, status: r.status, data }))
+      .catch(() => ({ ok: r.ok, status: r.status, data: {} })))
+      .then((res) => {
+        if (!res.ok) {
+          $("set-msg").innerHTML = '<span class="warn">'
+            + esc((res.data && res.data.error) || ("HTTP " + res.status)) + "</span>";
+          return;
+        }
+        renderSettings(res.data.settings);
+        renderTest(res.data.test);
+        applyKeyStatus(res.data.settings);
+        render();
+        $("set-msg").textContent = res.data.test
+          ? (res.data.test.ok ? "通了 —— 现在就能开局。" : "没通，看下面写的原因。")
+          : "已保存。";
+      })
+      .catch(() => {
+        $("set-msg").innerHTML = '<span class="warn">保存失败，看服务端日志。</span>';
+      });
+  }
+
+  $("btn-settings").onclick = openSettings;
+  $("settings-close").onclick = closeSettings;
+  $("settings-modal").onclick = (e) => { if (e.target.id === "settings-modal") closeSettings(); };
+  addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("settings-modal").classList.contains("hidden")) closeSettings();
+  });
+  // 提示条和页脚里那两个「设置」是每次重画都新建的，所以在 document 上代理一次。
+  document.addEventListener("click", (e) => {
+    const id = e.target && e.target.id;
+    if (id === "banner-settings" || id === "foot-settings") { e.preventDefault(); openSettings(); }
+  });
+  $("set-save").onclick = () => {
+    const value = $("set-key").value;
+    $("set-key").value = "";          // 存过就不留在 DOM 里
+    settingsPost({ jev_api_key: value, test: true }, "保存中…（要真发一次请求，几秒）");
+  };
+  $("set-test").onclick = () => settingsPost({ test: true }, "测试中…（真发一次请求，几秒）");
+  $("set-clear").onclick = () => settingsPost({ jev_api_key: "" }, "清除中…");
+
   // 音效要等一次用户手势才解得开（浏览器自动播放策略）。
   const muteBtn = $("btn-mute");
   muteBtn.onclick = () => {
@@ -1239,7 +1427,8 @@
     .then((r) => r.json())
     .then((h) => {
       if (!h.jev_key) {
-        state.netError = "服务器没有读到 Jev 密钥。请 export JEV_API_KEY=… 后重启 server.py。";
+        applyKeyStatus(h.settings);
+        state.netError = "服务器还没有读到 Jev 密钥 —— 一局都开不了。";
       }
       if (h.deadline) state.deadline = h.deadline;
       serverAsrReady = h.asr === "command";

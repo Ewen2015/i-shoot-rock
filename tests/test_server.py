@@ -205,21 +205,151 @@ class CacheTest(unittest.TestCase):
             server.CACHE = server.Cache(server.CACHE_PATH)
 
 
-class HealthTest(unittest.TestCase):
-    def test_api_key_reads_either_name(self):
-        original = dict(os.environ)
-        try:
-            for name in ("JEV_API_KEY", "TYPESAFE_API_KEY"):
-                for other in ("JEV_API_KEY", "TYPESAFE_API_KEY"):
-                    os.environ.pop(other, None)
-                os.environ[name] = "  spaced-key  "
-                self.assertEqual(server.api_key(), "spaced-key")
-            for name in ("JEV_API_KEY", "TYPESAFE_API_KEY"):
+class KeyEnvironment(unittest.TestCase):
+    """把密钥的来源限定在用例里：一个空的密钥文件 + 一份可以随便改的环境。
+
+    没有这层隔离，开发者本机上真有一份设置文件时，这些用例会跟着它一起变。
+    """
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.saved = {name: os.environ.get(name) for name in
+                      ("JEV_API_KEY", "TYPESAFE_API_KEY", server.settings.PATH_ENV)}
+        os.environ[server.settings.PATH_ENV] = os.path.join(self.dir.name, "settings.json")
+        for name in server.settings.ENV_NAMES["jev_api_key"]:
+            os.environ.pop(name, None)
+
+    def tearDown(self):
+        for name, value in self.saved.items():
+            if value is None:
                 os.environ.pop(name, None)
-            self.assertIsNone(server.api_key())
+            else:
+                os.environ[name] = value
+
+
+class HealthTest(KeyEnvironment):
+    def test_api_key_reads_either_name(self):
+        for name in ("JEV_API_KEY", "TYPESAFE_API_KEY"):
+            for other in ("JEV_API_KEY", "TYPESAFE_API_KEY"):
+                os.environ.pop(other, None)
+            os.environ[name] = "  spaced-key  "
+            self.assertEqual(server.api_key(), "spaced-key")
+        for name in ("JEV_API_KEY", "TYPESAFE_API_KEY"):
+            os.environ.pop(name, None)
+        self.assertIsNone(server.api_key())
+
+    def test_the_settings_file_wins_over_the_environment(self):
+        # 页面「设置」里填的优先于环境变量 —— 优先级只有 settings 一处实现，
+        # 这里测的是服务器确实走的是那一处。
+        os.environ["TYPESAFE_API_KEY"] = "from-env"
+        server.settings.save({"jev_api_key": "from-page"})
+        self.assertEqual(server.api_key(), "from-page")
+
+    def test_the_health_payload_carries_the_status_but_never_the_key(self):
+        server.settings.save({"jev_api_key": "sk-abcdefghijklmnop"})
+        payload = {"ok": True, "jev_key": bool(server.api_key()),
+                   "settings": server.settings.key_status()}
+        blob = json.dumps(payload, ensure_ascii=False)
+        self.assertNotIn("sk-abcdefghijklmnop", blob)
+        self.assertTrue(payload["settings"]["jev_api_key"]["configured"])
+
+
+class CheckKeyTest(KeyEnvironment):
+    """页面上的「测试」：真的打一次上游，得到的是 ok/detail，不是异常。"""
+
+    def setUp(self):
+        super().setUp()
+        self.original_urlopen = urllib.request.urlopen
+        self.original_cache_enabled = server.CACHE.enabled
+        server.CACHE.enabled = lambda: False
+        server.time.sleep = lambda _s: None
+
+    def tearDown(self):
+        urllib.request.urlopen = self.original_urlopen
+        server.CACHE.enabled = self.original_cache_enabled
+        server.time.sleep = time.sleep
+        super().tearDown()
+
+    def fake(self, script):
+        recorder = UrlopenRecorder(script)
+        urllib.request.urlopen = recorder
+        return recorder
+
+    def test_a_working_key_comes_back_ok(self):
+        os.environ["JEV_API_KEY"] = "sk-good"
+        self.fake([ANSWER])
+        report = server.check_key()
+        self.assertTrue(report["ok"])
+        self.assertIn("jev-test", report["detail"])
+        # 详情里说得出它出的是哪一手，才算真的走完了「解析 -> 出拳」这一段。
+        self.assertTrue(any(label in report["detail"] for label in ("石头", "布", "剪刀")),
+                        report["detail"])
+
+    def test_a_missing_key_is_reported_as_a_verdict_not_an_exception(self):
+        report = server.check_key()
+        self.assertFalse(report["ok"])
+        self.assertIn("JEV_API_KEY", report["detail"])
+
+    def test_a_rejected_key_is_reported_with_the_upstream_reason(self):
+        os.environ["JEV_API_KEY"] = "sk-bad"
+        self.fake([http_error(401, "bad key")])
+        report = server.check_key()
+        self.assertFalse(report["ok"])
+        self.assertIn("401", report["detail"])
+
+    def test_the_check_never_reads_or_writes_the_cache(self):
+        # 命中的缓存证明不了这个 key 还有效 —— 所以「测试」那一下必须真的出门。
+        os.environ["JEV_API_KEY"] = "sk-good"
+        touched = []
+
+        class RecordingCache:
+            def get(self, body):
+                touched.append("get")
+                return None
+
+            def put(self, body, response):
+                touched.append("put")
+
+        original = server.CACHE
+        server.CACHE = RecordingCache()
+        try:
+            self.fake([ANSWER])
+            self.assertTrue(server.check_key()["ok"])
         finally:
-            os.environ.clear()
-            os.environ.update(original)
+            server.CACHE = original
+        self.assertEqual(touched, [])
+
+    def test_the_verdict_never_leaks_the_key(self):
+        secret = "sk-super-secret-key"
+        os.environ["JEV_API_KEY"] = secret
+        self.fake([http_error(401, "bad key")])
+        report = server.check_key()
+        self.assertNotIn(secret, json.dumps(report, ensure_ascii=False))
+
+
+class SettingsEndpointTest(KeyEnvironment):
+    """handle_settings()：存下去、回状态、永远不回 key。"""
+
+    def test_saving_a_key_reports_status_without_the_key(self):
+        result = server.handle_settings({"jev_api_key": "sk-abcdefghijklmnop"})
+        blob = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn("sk-abcdefghijklmnop", blob)
+        self.assertTrue(result["settings"]["jev_api_key"]["configured"])
+        self.assertEqual(result["settings"]["jev_api_key"]["source"], "settings")
+        self.assertEqual(server.api_key(), "sk-abcdefghijklmnop")
+
+    def test_clearing_a_key_falls_back_to_the_environment(self):
+        server.settings.save({"jev_api_key": "from-page"})
+        os.environ["JEV_API_KEY"] = "from-env"
+        result = server.handle_settings({"jev_api_key": ""})
+        self.assertEqual(result["settings"]["jev_api_key"]["source"], "env")
+        self.assertEqual(server.api_key(), "from-env")
+
+    def test_a_paste_accident_is_refused_before_anything_is_written(self):
+        with self.assertRaises(ValueError):
+            server.handle_settings({"jev_api_key": "sk-abc\ndef"})
+        self.assertIsNone(server.settings.get("jev_api_key"))
 
 
 class AsrTest(unittest.TestCase):

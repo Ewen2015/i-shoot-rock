@@ -35,6 +35,11 @@ export JEV_API_KEY="..."      # 或 TYPESAFE_API_KEY
 python3 src/server.py         # 然后打开 http://127.0.0.1:8765
 ```
 
+**不想碰终端就别设这两个变量**：起服务后打开页面，点右上角的「设置」，把 key 粘进去，
+点「保存并测试」—— 它会真发一次请求，告诉你到底通不通。key 只落在服务端的
+`var/i_shoot_rock.settings.json`（权限 0600），页面读不回来，只看得到「填了没有」和前后四位；
+这里填的优先于环境变量。
+
 只有标准库，不需要 `pip install`。先确认密钥能用：
 
 ```bash
@@ -60,16 +65,17 @@ python3 src/server.py --check
 | 路径 | 内容 |
 | --- | --- |
 | `src/game.py` | 纯逻辑：规则、`state` 原文、从信念到出拳的算术、语音文本解析 |
-| `src/server.py` | 本地服务器：代理 Jev（密钥不出服务器）、识别转发、静态页面、缓存 |
+| `src/server.py` | 本地服务器：代理 Jev（密钥不出服务器）、识别转发、静态页面、缓存、设置接口 |
+| `src/settings.py` | 密钥的来源与优先级：页面填的存文件，环境变量兜底，两者都不外泄 |
 | `web/index.html` | 页面，单文件零外部依赖：倒计时与音效、牌桌、记忆、语音接线 |
-| `tests/` | `game.py` 56 个 + `server.py` 23 个测试，不联网 |
+| `tests/` | `game.py` 56 个 + `server.py` 33 个 + `settings.py` 24 个测试，不联网 |
 | `docs/` | 下面那几篇 |
-| `var/` | 运行时产物（识别的本地缓存），已 gitignore |
+| `var/` | 运行时产物（识别的本地缓存、密钥文件），已 gitignore |
 
 ## 测试
 
 ```bash
-python3 tests/test_game.py && python3 tests/test_server.py
+python3 tests/test_game.py && python3 tests/test_server.py && python3 tests/test_settings.py
 ```
 
 ## 文档
@@ -83,5 +89,6 @@ python3 tests/test_game.py && python3 tests/test_server.py
 
 ## 说明
 
-- 密钥只在服务器进程里，页面拿不到。
+- 密钥只存在服务器进程和它的设置文件里（0600），页面拿不到 —— 读取接口给的是
+  「填了没有、来自哪里、前后四位」，从来没有 key 本身。
 - 历史只存在浏览器内存里，刷新页面就没了 —— 没有做持久化。
