@@ -6,14 +6,14 @@
 `127.0.0.1` 说话，真正带 key 的那一次请求从这里发出去。
 
     export JEV_API_KEY="..."      # 或 TYPESAFE_API_KEY
-    python3 server.py             # 然后打开 http://127.0.0.1:8765
+    python3 src/server.py         # 然后打开 http://127.0.0.1:8765
 
 接口：
 
     GET  /                 游戏页面
     POST /api/decide       给历史，换回 Jev 的判断和这一回合的出拳
     POST /api/interpret    一句话 -> 指令/出拳（语音识别之后的解析）
-    POST /api/asr          音频 -> 文字（需要配 I_SHOOT_ROCK_ASR_CMD，见 README）
+    POST /api/asr          音频 -> 文字（需要配 I_SHOOT_ROCK_ASR_CMD，见 docs/speech.md）
     GET  /api/health       密钥在不在、ASR 通没通、有没有命中缓存
 
 只有标准库，不需要 pip install。
@@ -40,7 +40,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import game
 
+# 代码在 src/，页面在 web/，缓存落在 var/（仓库根下，已 gitignore）。
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+WEB = os.path.join(ROOT, "web")
 
 BASE_URL = os.environ.get("TYPESAFE_BASE_URL", "https://api.typesafe.ai").rstrip("/")
 ENDPOINT = BASE_URL + "/v1/systemone"
@@ -57,7 +60,8 @@ RETRY_STATUS = (408, 425, 429, 500, 502, 503, 504, 529)
 
 CACHE_ENV = "I_SHOOT_ROCK_CACHE"
 CACHE_OFF = ("", "0", "off", "no", "false")
-CACHE_PATH = os.environ.get("I_SHOOT_ROCK_CACHE_PATH") or os.path.join(HERE, "i_shoot_rock.jevcache.db")
+CACHE_PATH = (os.environ.get("I_SHOOT_ROCK_CACHE_PATH")
+              or os.path.join(ROOT, "var", "i_shoot_rock.jevcache.db"))
 ASR_ENV = "I_SHOOT_ROCK_ASR_CMD"
 
 MAX_BODY = 32 * 1024 * 1024
@@ -82,6 +86,13 @@ class Cache:
         value = os.environ.get(CACHE_ENV)
         return True if value is None else value.strip().lower() not in CACHE_OFF
 
+    def _connect(self):
+        """开一个连接。`var/` 是运行时才出现的目录，第一次用的时候顺手建出来。"""
+        parent = os.path.dirname(self.path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        return sqlite3.connect(self.path, timeout=5)
+
     def _key(self, body):
         return hashlib.sha256((ENDPOINT + "\n").encode() + body).hexdigest()
 
@@ -89,7 +100,7 @@ class Cache:
         if not self.enabled():
             return None
         try:
-            with self.lock, sqlite3.connect(self.path, timeout=5) as conn:
+            with self.lock, self._connect() as conn:
                 conn.execute(self.SCHEMA)
                 row = conn.execute("SELECT body FROM response WHERE digest = ?",
                                    (self._key(body),)).fetchone()
@@ -101,7 +112,7 @@ class Cache:
         if not self.enabled() or not storable(response):
             return
         try:
-            with self.lock, sqlite3.connect(self.path, timeout=5) as conn:
+            with self.lock, self._connect() as conn:
                 conn.execute(self.SCHEMA)
                 conn.execute("INSERT OR REPLACE INTO response (digest, body, made_at) VALUES (?, ?, ?)",
                              (self._key(body), json.dumps(response, ensure_ascii=False), time.time()))
@@ -207,8 +218,8 @@ def asr_command():
 
     这里不内置任何一家云厂商的调用：那种代码在这个环境里没法验证，写进去就是
     猜。取而代之的是一个明确的接口 —— `{wav}` 会被替换成临时音频文件路径，
-    命令经由 shell 执行，往 stdout 打一行文字即可。README 里有阿里云百炼 `bl`
-    的现成配方。
+    命令经由 shell 执行，往 stdout 打一行文字即可。docs/speech.md 里有阿里云百炼
+    `bl` 的现成配方。
     """
     value = (os.environ.get(ASR_ENV) or "").strip()
     return value or None
@@ -315,7 +326,7 @@ class Handler(BaseHTTPRequestHandler):
     def send_file(self, name):
         if name not in STATIC:
             return self.send_json({"error": "not found"}, 404)
-        full = os.path.join(HERE, name)
+        full = os.path.join(WEB, name)
         if not os.path.isfile(full):
             return self.send_json({"error": "%s 不存在" % name}, 404)
         with open(full, "rb") as handle:

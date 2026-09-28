@@ -2,13 +2,18 @@
 # -*- coding: utf-8 -*-
 """game.py 的单元测试。只跑纯逻辑，不需要 API key，也不联网。
 
-    python3 test_game.py
+    python3 tests/test_game.py
 """
 
 from __future__ import annotations
 
 import random
+import sys
 import unittest
+from pathlib import Path
+
+# 测试和源码不在同一层：把 src/ 放上 sys.path 才 import 得到 game。
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import game
 

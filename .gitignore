@@ -1,7 +1,5 @@
 .DS_Store
 __pycache__/
 *.pyc
-# 上游回答的本地缓存，会自己重建
-i_shoot_rock.jevcache.db
-i_shoot_rock.jevcache.db-shm
-i_shoot_rock.jevcache.db-wal
+# 运行时产物：上游回答的本地缓存，会自己重建
+var/

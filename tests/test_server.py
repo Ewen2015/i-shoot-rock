@@ -4,7 +4,7 @@
 
 网络被替换掉，所以这里不需要 API key，也不会真的花钱。
 
-    python3 test_server.py
+    python3 tests/test_server.py
 """
 
 from __future__ import annotations
@@ -12,11 +12,18 @@ from __future__ import annotations
 import io
 import json
 import os
+import sys
 import tempfile
 import time
 import unittest
 import urllib.error
 import urllib.request
+from pathlib import Path
+
+# 测试和源码不在同一层：把 src/ 放上 sys.path 才 import 得到 server。
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+import server
 
 import server
 

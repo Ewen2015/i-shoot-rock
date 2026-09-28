@@ -1214,7 +1214,7 @@
       render();
     })
     .catch(() => {
-      state.netError = "连不上本地服务器。请先运行 python3 server.py，再打开这个页面。";
+      state.netError = "连不上本地服务器。请先运行 python3 src/server.py，再打开这个页面。";
       render();
     });
   startMeter();
