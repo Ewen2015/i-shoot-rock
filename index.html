@@ -109,12 +109,51 @@
 
   /* ---------------- 牌桌 ---------------- */
   .stage {
+    position: relative; overflow: hidden;
     background: var(--field); min-height: 320px; padding: 22px 16px;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     text-align: center; gap: 4px;
     box-shadow: inset 1px 1px 0 0 var(--bev-lo2), inset -1px -1px 0 0 var(--bev-hi),
                 inset 2px 2px 0 0 var(--bev-lo), inset -2px -2px 0 0 var(--bev-hi2);
   }
+
+  /* ---------------- 赢了 / 输了 ---------------- */
+  /* 开牌那一下得有分量：赢是粉色半调点阵炸开、赢的那只手「盖章」；
+     输是整张桌子抖一下，墨色点阵散开。曲线一律 steps()，不跟直角那套语言打架。 */
+  @keyframes stamp { 0% { transform: scale(.55); } 45% { transform: scale(1.16); } 100% { transform: scale(1); } }
+  @keyframes shakeit {
+    0%, 100% { transform: translateX(0); } 15% { transform: translateX(-9px); }
+    30% { transform: translateX(8px); } 45% { transform: translateX(-5px); }
+    65% { transform: translateX(4px); } 85% { transform: translateX(-2px); }
+  }
+  @keyframes burstout {
+    from { transform: scale(.3); opacity: var(--burst-a); }
+    65% { opacity: calc(var(--burst-a) * .6); }
+    to { transform: scale(1.45); opacity: 0; }
+  }
+  @keyframes hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+
+  .burst {
+    position: absolute; left: 50%; top: 50%; width: 520px; height: 520px; margin: -260px 0 0 -260px;
+    pointer-events: none; opacity: 0; --burst-a: .88;
+    --ring-in: 40%; --ring-mid: 57%; --ring-out: 76%;
+    background-image: radial-gradient(circle, var(--pink) 2px, transparent 2.2px);
+    background-size: 9px 9px;
+    /* 中间挖空：散开的是一圈半调点阵，不是一团糊住牌桌的灰球。 */
+    -webkit-mask-image: radial-gradient(circle, transparent 0 var(--ring-in), #000 var(--ring-mid), transparent var(--ring-out));
+    mask-image: radial-gradient(circle, transparent 0 var(--ring-in), #000 var(--ring-mid), transparent var(--ring-out));
+  }
+  .burst.ink {
+    /* 输的那一下：更细、更淡的一圈，别把牌桌糊掉。 */
+    --burst-a: .4; --ring-in: 52%; --ring-mid: 63%; --ring-out: 74%;
+    background-image: radial-gradient(circle, var(--ink) 2px, transparent 2.2px);
+  }
+  .stage.win .burst, .stage.lose .burst { animation: burstout .85s steps(9, end) both; }
+  .stage.win .hand.you { animation: stamp .42s steps(5, end) both; }
+  .stage.lose .hand.jev { animation: stamp .42s steps(5, end) both; }
+  .stage.lose { animation: shakeit .45s steps(6, end) 1; }
+  .stage.tie .hand .glyph { animation: hop .38s steps(3, end) 2; }
+  .stage.win .verdict, .stage.lose .verdict, .stage.tie .verdict { animation: stamp .42s steps(5, end) both; }
   .countdown {
     font: 700 clamp(64px, 13vw, 118px)/1 var(--sans); color: var(--pink);
     letter-spacing: -.04em; font-variant-numeric: tabular-nums;
@@ -347,6 +386,7 @@
     jevStarted: 0,
     goAt: 0,                // 「出拳！」那一下是什么时候画的
     jevOpen: false,         // 用户自己拉开过「Jev 的判断」没有
+    lagMs: 0,               // 这一次倒计时为声音让出的延迟
     deadline: 30,
     transcript: "",
     listening: false,
@@ -392,28 +432,49 @@
     // 让他把数字也往后挪到同一刻。
     function lagMs() {
       if (!ctxAudio || ctxAudio.state !== "running") return 0;
-      // 只信「像样」的 outputLatency。实测这台机器上的 Chrome 会报 2.008 秒 ——
-      // 查不到真实设备时它就是这么个数。照它去挪数字，数字会凭空晚 300 毫秒，
-      // 那就不是修错位，是制造错位了。不可信的报值退回到 baseLatency（5.8ms）。
-      const out = ctxAudio.outputLatency;
-      const s = (out > 0 && out <= 0.25) ? out : (ctxAudio.baseLatency || 0);
-      return Math.round(Math.max(0, Math.min(0.30, s)) * 1000);
+      // 两个都要看：outputLatency 是「缓冲区 + 设备」的总延迟。第一版把这个数
+      // 当成不可信直接截到 300ms —— 那是错的。这台机器的默认输出是 **AirPlay**，
+      // 实测报的就是 2.008 秒，而且是真的：声音真的晚两秒才出来。
+      // 所以照单全收，只做一个 3 秒的上限防止病态值。
+      const s = Math.max(ctxAudio.outputLatency || 0, ctxAudio.baseLatency || 0);
+      return Math.round(Math.max(0, Math.min(3, s)) * 1000);
+    }
+
+    // 把一个音排进音频时钟。`at` 是音频时钟上的时刻；它可以是未来 —— 倒计时就是
+    // 一次把四声全排好，靠这个才不会被主线程的卡顿拖歪。
+    function tone(ac, at, freq, ms, gain, type, to) {
+      const osc = ac.createOscillator();
+      const amp = ac.createGain();
+      osc.type = type || "square";
+      osc.frequency.setValueAtTime(freq, at);
+      if (to) osc.frequency.linearRampToValueAtTime(to, at + ms / 1000);
+      amp.gain.setValueAtTime(gain, at);
+      amp.gain.exponentialRampToValueAtTime(0.0001, at + ms / 1000);
+      osc.connect(amp); amp.connect(master);
+      osc.start(at); osc.stop(at + ms / 1000 + 0.02);
     }
 
     function beep(freq, ms, gain, type, to) {
       const ac = running();
       if (!ac) return 0;
-      const t = ac.currentTime;
-      const osc = ac.createOscillator();
-      const amp = ac.createGain();
-      osc.type = type || "square";
-      osc.frequency.setValueAtTime(freq, t);
-      if (to) osc.frequency.linearRampToValueAtTime(to, t + ms / 1000);
-      amp.gain.setValueAtTime(gain, t);
-      amp.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
-      osc.connect(amp); amp.connect(master);
-      osc.start(t); osc.stop(t + ms / 1000 + 0.02);
+      tone(ac, ac.currentTime, freq, ms, gain, type, to);
       return lagMs();
+    }
+
+    // 整条倒计时一次排定在音频时钟上（音频时钟不像 setInterval 那样会被主线程
+    // 拖歪）：3、2、1 各一声短「嘀」，最后一拍是「出拳」的长音。
+    // 返回每一拍「进到耳朵里」的相对毫秒 —— 调用方照这张表画数字，两边就同一刻到。
+    function schedule(intervalMs) {
+      const ac = running();
+      if (!ac || muted) return null;
+      const lag = lagMs();
+      const base = ac.currentTime + lag / 1000;
+      return [1046, 1046, 1046, 523].map((freq, i) => {
+        const last = i === 3;
+        tone(ac, base + (i * intervalMs) / 1000, freq,
+             last ? 190 : 70, last ? 0.07 : 0.055, "square", last ? 784 : 0);
+        return lag + i * intervalMs;
+      });
     }
 
     return {
@@ -430,13 +491,22 @@
       // 真的出得了声（蓝牙设备更久），第一声「嘀」就卡在这段启动时间里 ——
       // 那正是「数字画完了声音才响」的来源。放一个听不见的极短音把它顶出来。
       warm() { beep(1760, 12, 0.0008, "sine"); },
-      // 3 / 2 / 1：短促清脆的一声。返回值是「这一声还要过多久才进到耳朵里」。
-      tick() { return beep(1046, 70, 0.05, "square"); },
-      // 数到 0：低一点、长一点，给个「出拳」的感觉。
-      go() { return beep(523, 190, 0.06, "square", 784); },
-      win() { beep(659, 110, 0.055, "triangle"); setTimeout(() => beep(988, 190, 0.055, "triangle"), 110); },
-      lose() { beep(330, 130, 0.055, "triangle"); setTimeout(() => beep(208, 240, 0.055, "triangle"), 130); },
-      tie() { beep(440, 170, 0.05, "triangle"); },
+      // 等上下文真的跑起来、并且把设备延迟报出来之后再排 —— 见文件里那段关于
+      // 「刚建出来的 AudioContext 先报 0」的注释。排不出来返回 null，那就只画数字。
+      async countdown(intervalMs, waitMs) {
+        const ac = ensure();
+        if (!ac || muted) return null;
+        const until = Date.now() + (waitMs || 0);
+        while ((ac.state !== "running" || !ac.outputLatency) && Date.now() < until) {
+          if (ac.state === "suspended") ac.resume().catch(() => {});
+          await new Promise((r) => setTimeout(r, 25));
+        }
+        return schedule(intervalMs);
+      },
+      // 赢是往上跳的两个音，输是往下掉的两个，平局是一个不高不低的单音。
+      win() { beep(659, 110, 0.07, "triangle"); setTimeout(() => beep(988, 200, 0.07, "triangle"), 110); },
+      lose() { beep(330, 130, 0.07, "triangle"); setTimeout(() => beep(208, 260, 0.07, "triangle"), 130); },
+      tie() { beep(440, 170, 0.06, "triangle"); },
     };
   })();
 
@@ -479,6 +549,7 @@
 
   function renderStage() {
     const el = $("stage-main");
+    el.className = "stage";          // 上一次结算的动画类要清掉
 
     if (state.phase === "idle") {
       const t = tally();
@@ -497,7 +568,11 @@
       el.innerHTML =
         (state.count
           ? '<div class="countdown beat" id="count-num">' + state.count + "</div>"
-          : '<div class="countdown" style="font-size:46px; color:var(--ink); text-shadow:none;">准备…</div>') +
+          : '<div class="countdown" style="font-size:46px; color:var(--ink); text-shadow:none;">准备…</div>' +
+            (state.lagMs > 400
+              ? '<div class="stage-line" style="margin-bottom:10px;">声音设备有 ' +
+                (state.lagMs / 1000).toFixed(1) + " 秒延迟，倒计时是按它对齐的</div>"
+              : "")) +
         '<div class="stage-line">说「石头剪刀布」，再喊你出的那一手<br>' +
         (state.userThrow
           ? '已听到：<b>' + LABEL[state.userThrow] + "</b>"
@@ -674,21 +749,17 @@
   }
 
   // ---------------------------------------------------------------- 一局
-  // 数字和声音必须同一刻到。响一声是立刻的，但那一声要过一段设备延迟才真的从
-  // 扬声器出来（见 sfx.lagMs：有线几十毫秒，蓝牙耳机一两百毫秒），而屏幕是马上
-  // 画的 —— 于是耳朵听到的总落在眼睛看到数字之后。声音没法提前，那就让数字等：
-  // 先响，等这一声进到耳朵里，再把数字画出来。
-  function beat(paint, sound) {
-    const lag = sound() || 0;
-    if (!lag) { paint(); return; }
-    setTimeout(paint, lag);
-  }
-
-  function startCountdown() {
+  // 数字和声音必须同一刻到。声音只能往后排、没法提前（设备延迟是硬的：
+  // 这台机器的默认输出是 AirPlay，声音晚两秒才出来），所以让屏幕上的一切跟着
+  // 音频时钟走 —— sfx.countdown() 一次排定四声并给出每一拍「进到耳朵里」的时刻，
+  // 数字就照那张表画。倒计时因此可能从「准备…」等上两秒，那是这台设备的事实，
+  // 不是卡顿，所以屏幕上会写明白。
+  async function startCountdown() {
     if (state.phase !== "idle") return;
     state.phase = "countdown";
     state.count = null;              // 先「准备…」，第一个数字等到它的声音一起出现
     state.goAt = 0;
+    state.lagMs = 0;
     state.userThrow = null;
     state.jev = null;
     state.jevError = null;
@@ -697,29 +768,24 @@
     render();
     askJev();                        // 和倒计时并排跑，别让它拖后腿
 
-    beat(() => { if (state.phase === "countdown") { state.count = 3; renderStage(); } },
-         sfx.tick);                  // 「3」
-
-    let left = 3;
-    const timer = setInterval(() => {
-      left -= 1;
-      if (left > 0) {
-        beat(() => { if (state.phase === "countdown") { state.count = left; renderStage(); } },
-             sfx.tick);              // 「2」「1」
-        return;
-      }
-      clearInterval(timer);
+    // 排得出声音就照音频时钟走，排不出（没解锁 / 静音 / 没有音频）就退回
+    // 纯视觉的 1 秒一拍。等最多 250 毫秒是为了让 Chrome 把设备延迟报出来：
+    // 刚建出来的 AudioContext 会先给 0，几十毫秒后才是真值，而这几十毫秒
+    // 正好压在「点开始」这一刻上 —— 照 0 去对齐，AirPlay 上就等于没对齐。
+    const plan = await sfx.countdown(1000, 250) || [0, 1000, 2000, 3000];
+    state.lagMs = plan[0];
+    renderStage();
+    plan.forEach((at, i) => setTimeout(() => {
+      if (state.phase !== "countdown") return;
+      state.count = 3 - i;
+      if (i < 3) { renderStage(); return; }
       // 数到 0：这一声配上「出拳！」，它就不再是一声孤零零的响。
-      beat(() => {
-        if (state.phase !== "countdown") return;
-        state.count = 0;
-        state.phase = "waiting";
-        state.goAt = Date.now();
-        render();
-        maybeFinish();
-        setTimeout(() => { if (state.phase === "waiting") renderStage(); }, 900);
-      }, sfx.go);
-    }, 1000);
+      state.phase = "waiting";
+      state.goAt = Date.now();
+      render();
+      maybeFinish();
+      setTimeout(() => { if (state.phase === "waiting") renderStage(); }, 900);
+    }, at));
   }
 
   async function askJev() {
@@ -798,17 +864,36 @@
 
     const result = outcome(state.userThrow, state.jev.throw);
     state.history.push({ user: state.userThrow, jev: state.jev.throw, result });
+    state.phase = "reveal";
+    render();
+
+    // 开牌这一下要有分量：声音排出去，动画等这一声进到耳朵里再放 ——
+    // 于是「炸开那一下」和「那一声」是同一刻到的。静音时没什么可等的。
+    const wait = sfx.isMuted() ? 0 : sfx.lagMs();
     if (result === "user") sfx.win();
     else if (result === "jev") sfx.lose();
     else sfx.tie();
-    state.phase = "reveal";
-    render();
+    setTimeout(() => { if (state.phase === "reveal") celebrate(result); }, wait);
+    // 结算画面也跟着延长，别让动画没放完就被收走。
     setTimeout(() => {
       if (state.phase === "reveal") {
         state.phase = "idle";
         render();
       }
-    }, 2600);
+    }, 2600 + wait);
+  }
+
+  // 赢：粉色的半调点阵炸开，赢的那只手盖下来。输：整张牌桌抖一下，墨色的点阵散开。
+  // 平局：两边一起跳一下。都是 steps()，不跟 Win95 的直角走两套语言。
+  function celebrate(result) {
+    const el = $("stage-main");
+    if (!el) return;
+    const kind = result === "user" ? "win" : result === "jev" ? "lose" : "tie";
+    const burst = document.createElement("div");
+    burst.className = "burst" + (kind === "lose" ? " ink" : "");
+    el.appendChild(burst);
+    el.classList.add(kind);              // 触发 CSS 动画（点阵 + 盖章 / 抖动）
+    setTimeout(() => burst.remove(), 900);
   }
 
   function newSession() {
