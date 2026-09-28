@@ -235,21 +235,194 @@ def strip_chants(text):
     return out
 
 
+# --------------------------------------------------------------------------- #
+# 读音：识别器按音写字，所以按音认拳
+# --------------------------------------------------------------------------- #
+#
+# 为什么需要这一层：语音识别把「布」写成「不」是常态 —— 同一个音，它随手挑一个
+# 同音字，而且每次挑的还不一样。只按字面比对，人明明喊了「布」，解析出来却是空的。
+# 人喊的是音，那就把字还原成音再比。
+#
+# 表里只收这个游戏用得上的音节（十来组），不引第三方拼音库：这个项目只用标准库。
+# 收不进表的字不参与读音比对，只由下面字面那一层负责。
+
+SYLLABLE_CHARS = {
+    # jiǎn dāo / jiǎn zi
+    "jian": "剪剑建见间简件健检减键兼捡箭监坚尖肩艰贱践溅茧柬碱荐奸煎歼鉴",
+    "dao": "刀到道倒岛盗稻导悼蹈捣祷",
+    "zi": "子字自资紫姿咨滋兹姊仔渍",
+    # shí tou / chuí zi / quán
+    "shi": "石时十实识是事师施失市式世室试视势释饰氏拾食蚀史使始驶矢屎虱湿诗狮尸",
+    "tou": "头投偷透骰",
+    "chui": "锤垂吹炊捶槌棰",
+    "quan": "拳全权泉圈犬劝券痊蜷颧",
+    # bù / bāo fu
+    "bu": "布不步部埠怖捕补卜簿哺",
+    "bao": "包报保抱暴宝饱胞堡苞褒鲍剥雹豹",
+    "fu": "袱服伏福副富复付附负夫府幅符妇扶抚腹覆缚甫辅腐赴赋敷辐俯斧",
+}
+
+CHAR_SOUND = {char: syllable for syllable, chars in SYLLABLE_CHARS.items() for char in chars}
+
+# 识别器最容易混的声母和韵母（翘舌/平舌、前后鼻音）。收敛到同一个键再比，
+# 省得为一个音把每种口音的字都列一遍。
+SOUND_FIXES = (
+    ("zh", "z"), ("ch", "c"), ("sh", "s"),
+    ("ang", "an"), ("eng", "en"), ("ing", "in"), ("ong", "on"),
+)
+
+# 「不」既是布，也是否定词。紧跟着这些字出现时，它是「不对」「不要」的那个不。
+AMBIGUOUS_BU = "不卜"
+NEGATIVE_TAILS = "对是要用行知好错会能想敢为如过但只光管论问妨怕准许同价值得免"
+
+
+def canon_syllable(syllable):
+    """把一个音节收敛成它的「音类」，让近音字也能对上。"""
+    canonical = syllable
+    for old, new in SOUND_FIXES:
+        canonical = canonical.replace(old, new)
+    return canonical
+
+
+def sound_keys(text):
+    """整句话的读音。有一个字收不进表就返回 None —— 这条读音不完整，不能当证据。"""
+    keys = []
+    for char in text:
+        syllable = CHAR_SOUND.get(char)
+        if syllable is None:
+            return None
+        keys.append(canon_syllable(syllable))
+    return tuple(keys)
+
+
+# 口诀的读音。口诀里也含着三种出拳的名字，不整段抠掉就会被数成一堆出拳。
+CHANT_KEYS = tuple(key for key in (sound_keys(chant) for chant in CHANTS) if key)
+
+# 出拳的读音。长的排前面，同一处命中多个时取更长的那个。
+THROW_SOUNDS = (
+    ("scissors", (("jian", "dao"), ("jian", "zi"), ("jian",))),
+    ("rock", (("shi", "tou"), ("chui", "zi"), ("chui",), ("quan", "tou"), ("quan",))),
+    ("paper", (("bu",), ("bao", "fu"))),
+)
+THROW_KEYS = tuple(
+    (throw, tuple(tuple(canon_syllable(sound) for sound in pattern) for pattern in patterns))
+    for throw, patterns in THROW_SOUNDS
+)
+
+
+def syllable_stream(text):
+    """把一句话变成 (音类, 字下标) 的序列。
+
+    收不进表的字留一个 None 当隔断：不隔断的话，前后两个音节会粘在一起，凭空
+    多出一堆不存在的音。英文单词整段跳过 —— 它们归字面那一层管。
+    """
+    stream = []
+    for index, char in enumerate(text):
+        syllable = CHAR_SOUND.get(char)
+        if syllable is not None:
+            stream.append((canon_syllable(syllable), index))
+        elif char.isascii():
+            continue
+        else:
+            stream.append((None, index))
+    return stream
+
+
+def _chant_positions(stream):
+    """读音流里被口诀占掉的音节下标（从左往右整段扫，不重叠）。"""
+    sounds = [syllable for syllable, _ in stream]
+    occupied = set()
+    index = 0
+    while index < len(sounds):
+        for key in CHANT_KEYS:
+            if tuple(sounds[index:index + len(key)]) == key:
+                occupied.update(range(index, index + len(key)))
+                index += len(key)
+                break
+        else:
+            index += 1
+    return occupied
+
+
+def _is_negative_bu(entry, pattern, text):
+    """「不」后面跟着「对/是/要…」时，它是否定词，不是布。"""
+    if pattern != ("bu",):
+        return False
+    _, index = entry
+    if text[index] not in AMBIGUOUS_BU:
+        return False
+    # 注意取的是切片不是单字：句子末尾没有后续，空字符串是任何字符串的子串。
+    tail = text[index + 1:index + 2]
+    return bool(tail) and tail in NEGATIVE_TAILS
+
+
+def find_throw_by_sound(text):
+    """按读音找一次出拳。
+
+    返回 (出拳, 它在原文里的字下标, 被口诀占掉的字下标)。找不到就是 (None, None, ...)。
+    """
+    stream = syllable_stream(text)
+    if not stream:
+        return None, None, frozenset()
+
+    occupied = _chant_positions(stream)
+    covered = frozenset(stream[position][1] for position in occupied)
+    kept = [entry for position, entry in enumerate(stream) if position not in occupied]
+
+    best = None
+    for start in range(len(kept)):
+        for throw, patterns in THROW_KEYS:
+            for pattern in patterns:
+                end = start + len(pattern)
+                if end > len(kept):
+                    continue
+                if tuple(syllable for syllable, _ in kept[start:end]) != pattern:
+                    continue
+                if _is_negative_bu(kept[start], pattern, text):
+                    continue
+                # 取最后一个；同一处命中多个时取更长的那个。
+                if best is None or (start, end) >= (best[0], best[1]):
+                    best = (start, end, throw)
+
+    if best is None:
+        return None, None, covered
+    return best[2], kept[best[0]][1], covered
+
+
+def find_throw_by_chars(text):
+    """按字面找出拳，取最后一个，返回 (字下标, 出拳)。"""
+    best_index, best_throw = None, None
+    for throw, words in THROW_WORDS:
+        for word in words:
+            index = text.rfind(word)
+            if index < 0:
+                continue
+            if best_index is None or index > best_index:
+                best_index, best_throw = index, throw
+    return best_index, best_throw
+
+
 def find_throw(text):
     """在文本里找出拳，取最后一个。
 
     取最后一个而不是第一个，是为了「我出石头……不对，布」这种自我更正，以及
     「石头剪刀布，我出布」这种口诀在前、出拳在后的说法。
+
+    先按读音找，读音没有结论时再按字面找；两处都命中时取靠后的那个。这样「布」被
+    写成「不」照样认得出，而「石头，不对，布」还是布。
     """
-    best_index, best_throw = -1, None
-    for throw, words in THROW_WORDS:
-        for word in words:
-            index = text.rfind(word)
-            if index > best_index or (index == best_index and index >= 0):
-                # 同一位置命中多个词时，取更长的那个（列表里靠前的）。
-                if index > best_index:
-                    best_index, best_throw = index, throw
-    return best_throw
+    throw, position, occupied = find_throw_by_sound(text)
+    if occupied:
+        # 读音认出的口诀把那些字也占掉：识别器把口诀末尾的「布」写成「不」时，
+        # 字面那一层不该再把口诀里的「剪刀」当成出拳。
+        text = "".join(" " if index in occupied else char for index, char in enumerate(text))
+    char_position, char_throw = find_throw_by_chars(text)
+
+    if throw is None:
+        return char_throw
+    if char_throw is None or position >= char_position:
+        return throw
+    return char_throw
 
 
 def parse_utterance(text):

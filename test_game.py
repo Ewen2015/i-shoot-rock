@@ -220,6 +220,60 @@ class ParseUtteranceTest(unittest.TestCase):
         self.assertEqual(game.parse_utterance("我觉得我这次要出剪刀了")["throw"], "scissors")
 
 
+class SoundFallbackTest(unittest.TestCase):
+    """识别器是按音写字的：它把「布」写成「不」是常态。
+
+    所以出拳不能只看字面，要先把字还原成音再比。这一组测的就是这条兜底。
+    """
+
+    def test_negative_adverb_is_paper(self):
+        # 用户实际遇到的那一条：喊「布」，识别成「不」。
+        self.assertEqual(game.parse_utterance("不")["throw"], "paper")
+        self.assertEqual(game.parse_utterance("石头剪刀布，不")["throw"], "paper")
+
+    def test_every_common_homophone_of_bu(self):
+        for char in "布不步部埠怖补":
+            self.assertEqual(game.parse_utterance("石头剪刀布，" + char)["throw"], "paper", char)
+
+    def test_homophones_of_the_other_throws(self):
+        for text in ("时头", "十头", "石头"):
+            self.assertEqual(game.parse_utterance("石头剪刀布，" + text)["throw"], "rock", text)
+        for text in ("尖刀", "剑刀", "剪刀"):
+            self.assertEqual(game.parse_utterance("石头剪刀布，" + text)["throw"], "scissors", text)
+        for text in ("包伏", "包服", "包袱"):
+            self.assertEqual(game.parse_utterance("石头剪刀布，" + text)["throw"], "paper", text)
+
+    def test_near_sounds_are_accepted(self):
+        # 翘舌/平舌、前后鼻音，是识别器最常混的两组。
+        self.assertEqual(game.parse_utterance("石头剪刀布，全头")["throw"], "rock")
+        self.assertEqual(game.parse_utterance("石头剪刀布，吹子")["throw"], "rock")
+        self.assertEqual(game.parse_utterance("石头剪刀布，剪子")["throw"], "scissors")
+
+    def test_a_negative_phrase_is_not_a_throw(self):
+        for text in ("不对", "不知道", "不要", "不行", "不是"):
+            self.assertIsNone(game.parse_utterance(text)["throw"], text)
+
+    def test_the_correction_still_lands_on_the_last_throw(self):
+        # 「不对」里的那个「不」不能被当成布，把用户真正的出拳盖掉。
+        self.assertEqual(game.parse_utterance("石头，不对，布")["throw"], "paper")
+        self.assertEqual(game.parse_utterance("石头，不对，剪刀")["throw"], "scissors")
+
+    def test_a_mangled_chant_is_still_only_a_chant(self):
+        # 口诀末尾的「布」被写成「不」时，整句仍是口诀，不是出了布（也不是剪刀）。
+        self.assertIsNone(game.parse_utterance("石头剪刀不")["throw"])
+        self.assertIsNone(game.parse_utterance("石头剪子不")["throw"])
+
+    def test_sound_layer_covers_every_word_we_accept(self):
+        # 表里漏掉一个字，那一手就会悄悄退回字面匹配。这条测试是给表做体检的。
+        for chant in game.CHANTS:
+            self.assertIsNotNone(game.sound_keys(chant), chant)
+        for throw, words in game.THROW_WORDS:
+            for word in words:
+                if word.isascii():
+                    continue
+                self.assertIsNotNone(game.sound_keys(word), word)
+
+
 class HistoryTest(unittest.TestCase):
     def test_round_record_computes_the_result(self):
         self.assertEqual(game.round_record("rock", "scissors")["result"], "user")
