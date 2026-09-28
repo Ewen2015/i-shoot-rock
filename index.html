@@ -1,497 +1,850 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>I Shoot Rock</title>
+<link rel="icon" href="data:,">
+<title>石头剪刀布 · 对 Jev</title>
 <style>
   :root {
-    --ink: #e9eef5;
-    --dim: #8a93a3;
-    --accent: #ffd166;
-    --danger: #ef476f;
     --bg: #0b0f16;
+    --panel: rgba(255,255,255,.035);
+    --line: rgba(255,255,255,.09);
+    --ink: #e9eef5;
+    --dim: #8d97a8;
+    --dimmer: #5d6675;
+    --accent: #ffd166;
+    --you: #5ec2ff;
+    --jev: #b98bff;
+    --win: #4ade80;
+    --lose: #f2555a;
+    --tie: #94a3b8;
   }
   * { box-sizing: border-box; }
   html, body {
     margin: 0;
-    height: 100%;
-    background: radial-gradient(120% 90% at 50% 0%, #16202f 0%, var(--bg) 60%);
+    min-height: 100%;
+    background: radial-gradient(120% 80% at 50% -10%, #172232 0%, var(--bg) 55%);
     color: var(--ink);
-    font: 15px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", Segoe UI, Roboto, sans-serif;
-    overflow: hidden;
-    -webkit-user-select: none;
-    user-select: none;
+    font: 15px/1.6 ui-sans-serif, -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  .wrap {
-    position: relative;
-    height: 100%;
-    display: grid;
-    place-items: center;
-    padding: 16px;
+  .app { max-width: 1080px; margin: 0 auto; padding: 22px 20px 40px; }
+
+  /* ---------- 顶栏 ---------- */
+  header { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 18px; }
+  h1 { font-size: 19px; margin: 0; letter-spacing: .01em; font-weight: 650; }
+  h1 small { color: var(--dimmer); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  .scoreboard { margin-left: auto; display: flex; gap: 10px; align-items: stretch; }
+  .score-chip {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
+    padding: 7px 13px; min-width: 78px; text-align: center;
   }
-  canvas {
-    width: min(100%, 860px);
-    height: auto;
-    aspect-ratio: 3 / 2;
-    border-radius: 14px;
-    box-shadow: 0 24px 60px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.06);
-    cursor: crosshair;
-    touch-action: none;
+  .score-chip .who { font-size: 11px; color: var(--dim); letter-spacing: .06em; }
+  .score-chip .n { font-size: 21px; font-variant-numeric: tabular-nums; font-weight: 650; line-height: 1.2; }
+  .score-chip.you .n { color: var(--you); }
+  .score-chip.jev .n { color: var(--jev); }
+  .score-chip.tie .n { color: var(--tie); }
+
+  /* ---------- 布局 ---------- */
+  .grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px;
   }
-  .hud {
-    position: absolute;
-    inset: 16px 16px auto 16px;
-    max-width: 860px;
-    margin: 0 auto;
-    display: flex;
-    justify-content: space-between;
-    pointer-events: none;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: .02em;
+  .card h2 {
+    font-size: 12px; letter-spacing: .1em; color: var(--dim); margin: 0 0 14px;
+    font-weight: 600; text-transform: uppercase;
   }
-  .hud b { color: var(--accent); font-weight: 600; }
-  .hint {
-    position: absolute;
-    bottom: 22px;
-    left: 0;
-    right: 0;
-    text-align: center;
-    color: var(--dim);
-    font-size: 13px;
+
+  /* ---------- 舞台 ---------- */
+  .stage {
+    min-height: 340px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; position: relative;
+    gap: 6px; padding: 26px 18px;
   }
-  kbd {
-    background: rgba(255,255,255,.08);
-    border: 1px solid rgba(255,255,255,.14);
-    border-bottom-width: 2px;
-    border-radius: 5px;
-    padding: 1px 6px;
-    font: inherit;
-    font-size: 12px;
+  .countdown {
+    font-size: 116px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+    color: var(--accent); text-shadow: 0 0 46px rgba(255,209,102,.4);
+  }
+  .countdown.beat { animation: pop .38s ease-out; }
+  @keyframes pop { 0% { transform: scale(1.24); opacity: .35; } 100% { transform: scale(1); opacity: 1; } }
+  .stage-line { color: var(--dim); font-size: 14px; }
+  .stage-line b { color: var(--ink); font-weight: 600; }
+
+  .versus { display: flex; align-items: center; justify-content: center; gap: 30px; margin: 6px 0 4px; }
+  .hand { text-align: center; min-width: 112px; }
+  .hand .glyph { font-size: 62px; line-height: 1.05; filter: saturate(.92); }
+  .hand .name { font-size: 15px; font-weight: 600; }
+  .hand.you .name { color: var(--you); }
+  .hand.jev .name { color: var(--jev); }
+  .hand .tag { font-size: 11px; color: var(--dimmer); letter-spacing: .07em; }
+  .hand.pending .glyph { opacity: .22; }
+  .vs { font-size: 13px; color: var(--dimmer); letter-spacing: .12em; }
+
+  .verdict { font-size: 27px; font-weight: 700; margin-top: 12px; }
+  .verdict.user { color: var(--win); }
+  .verdict.jev { color: var(--lose); }
+  .verdict.tie { color: var(--tie); }
+
+  .spinner {
+    display: inline-block; width: 13px; height: 13px; border-radius: 50%; margin-right: 8px;
+    border: 2px solid rgba(255,209,102,.25); border-top-color: var(--accent);
+    animation: spin .7s linear infinite; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---------- 麦克风 ---------- */
+  .mic { display: flex; align-items: center; gap: 11px; margin-top: 18px; }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 26px; }
+  .bars i {
+    width: 4px; border-radius: 2px; background: var(--dimmer); height: 4px;
+    transition: height .07s linear, background .2s;
+  }
+  .bars.live i { background: var(--accent); }
+  .mic .label { font-size: 12px; color: var(--dim); }
+
+  .transcript {
+    margin-top: 10px; font-size: 13px; color: var(--dim); min-height: 20px;
+    max-width: 460px; word-break: break-word;
+  }
+  .transcript b { color: var(--accent); }
+
+  /* ---------- 出拳按钮 ---------- */
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 16px; }
+  button {
+    font: inherit; color: var(--ink); background: rgba(255,255,255,.055);
+    border: 1px solid var(--line); border-radius: 11px; padding: 10px 17px;
+    cursor: pointer; transition: background .15s, transform .06s, border-color .15s;
+  }
+  button:hover:not(:disabled) { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.2); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .34; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #201a08; font-weight: 650; }
+  button.primary:hover:not(:disabled) { background: #ffdc86; }
+  button.throw { min-width: 92px; font-size: 15px; }
+  button.throw .g { display: block; font-size: 25px; line-height: 1.25; }
+  button.ghost { background: transparent; }
+
+  /* ---------- Jev 面板 ---------- */
+  .bars-row { display: grid; gap: 8px; margin-bottom: 14px; }
+  .bar-row { display: grid; grid-template-columns: 52px 1fr 46px; align-items: center; gap: 9px; font-size: 13px; }
+  .bar-row .k { color: var(--dim); }
+  .bar-row .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .track { height: 8px; background: rgba(255,255,255,.07); border-radius: 5px; overflow: hidden; }
+  .track span { display: block; height: 100%; background: var(--jev); border-radius: 5px; transition: width .35s ease; }
+  .track.best span { background: var(--accent); }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 13px; }
+  .kv dt { color: var(--dim); }
+  .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .note { font-size: 12px; color: var(--dimmer); line-height: 1.65; margin-top: 12px; }
+  .note b { color: var(--dim); font-weight: 600; }
+
+  details { margin-top: 13px; }
+  summary { cursor: pointer; font-size: 12px; color: var(--dim); }
+  summary:hover { color: var(--ink); }
+  pre {
+    background: rgba(0,0,0,.32); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; font-size: 12px; line-height: 1.65; overflow: auto; max-height: 260px;
+    white-space: pre-wrap; word-break: break-word; color: #c8d2e0; margin: 9px 0 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  /* ---------- 记忆 ---------- */
+  .memory { display: grid; gap: 6px; max-height: 300px; overflow: auto; }
+  .mem-row {
+    display: grid; grid-template-columns: 34px 1fr 1fr 60px; gap: 9px; align-items: center;
+    font-size: 13px; padding: 7px 10px; border-radius: 9px; background: rgba(255,255,255,.03);
+  }
+  .mem-row .idx { color: var(--dimmer); font-variant-numeric: tabular-nums; }
+  .mem-row .u { color: var(--you); }
+  .mem-row .j { color: var(--jev); }
+  .mem-row .r { text-align: right; font-size: 12px; }
+  .mem-row .r.user { color: var(--win); }
+  .mem-row .r.jev { color: var(--lose); }
+  .mem-row .r.tie { color: var(--tie); }
+  .empty { color: var(--dimmer); font-size: 13px; padding: 12px 2px; }
+
+  .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; }
+  .status-dot.ok { background: var(--win); }
+  .status-dot.off { background: var(--lose); }
+  .status-dot.warn { background: var(--accent); }
+  .banner {
+    border-radius: 11px; padding: 10px 13px; font-size: 13px; margin-bottom: 14px;
+    border: 1px solid var(--line); background: rgba(255,209,102,.07); color: #f0d9a0;
+    line-height: 1.6;
+  }
+  .banner.err { background: rgba(242,85,90,.1); border-color: rgba(242,85,90,.35); color: #f6b3b5; }
+  .foot { margin-top: 16px; font-size: 12px; color: var(--dimmer); line-height: 1.8; }
+  .foot code {
+    background: rgba(255,255,255,.06); border-radius: 5px; padding: 1px 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
   }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="hud">
-    <div>SCORE <b id="score">0</b></div>
-    <div>BEST <b id="best">0</b></div>
-    <div>LIVES <b id="lives">3</b></div>
+<div class="app">
+  <header>
+    <h1>石头剪刀布 <small>对 Jev</small></h1>
+    <div class="scoreboard">
+      <div class="score-chip you"><div class="who">你</div><div class="n" id="score-you">0</div></div>
+      <div class="score-chip tie"><div class="who">平</div><div class="n" id="score-tie">0</div></div>
+      <div class="score-chip jev"><div class="who">JEV</div><div class="n" id="score-jev">0</div></div>
+      <div class="score-chip"><div class="who">回合</div><div class="n" id="round-count">0</div></div>
+    </div>
+  </header>
+
+  <div id="banner"></div>
+
+  <div class="grid">
+    <!-- 左：牌桌 -->
+    <section class="card">
+      <div class="stage">
+        <div id="stage-main"></div>
+        <div class="mic">
+          <div class="bars" id="mic-bars"></div>
+          <span class="label" id="mic-label">麦克风未启动</span>
+        </div>
+        <div class="transcript" id="transcript"></div>
+        <div class="controls" id="controls"></div>
+      </div>
+    </section>
+
+    <!-- 右：Jev -->
+    <div style="display:grid; gap:16px;">
+      <section class="card">
+        <h2>Jev 的判断</h2>
+        <div id="jev-panel"></div>
+      </section>
+      <section class="card">
+        <h2>Memory · 它看到的历史</h2>
+        <div class="memory" id="memory"></div>
+        <div class="controls" style="justify-content:flex-start; margin-top:14px;">
+          <button id="btn-new-session" class="ghost">再来一个回合 · 清空历史</button>
+        </div>
+      </section>
+    </div>
   </div>
-  <canvas id="game" width="1200" height="800" aria-label="I Shoot Rock game canvas"></canvas>
-  <div class="hint">Move to aim &middot; <kbd>click</kbd> / <kbd>space</kbd> to shoot &middot; <kbd>P</kbd> pause</div>
+
+  <div class="foot" id="foot"></div>
 </div>
 
 <script>
 (() => {
   "use strict";
 
-  const canvas = document.getElementById("game");
-  const ctx = canvas.getContext("2d");
-  const W = canvas.width;
-  const H = canvas.height;
+  // ---------------------------------------------------------------- 规则
+  const THROWS = ["rock", "paper", "scissors"];
+  const LABEL = { rock: "石头", paper: "布", scissors: "剪刀" };
+  const GLYPH = { rock: "✊", paper: "✋", scissors: "✌️" };
+  const BEATS = { rock: "scissors", paper: "rock", scissors: "paper" };
+  const LOSES_TO = { rock: "paper", paper: "scissors", scissors: "rock" };
+  const OUTCOME_LABEL = { user: "你赢了", jev: "Jev 赢了", tie: "平局" };
 
-  const ui = {
-    score: document.getElementById("score"),
-    best: document.getElementById("best"),
-    lives: document.getElementById("lives"),
-  };
+  function outcome(user, jev) {
+    if (user === jev) return "tie";
+    return BEATS[user] === jev ? "user" : "jev";
+  }
 
-  const BEST_KEY = "i-shoot-rock:best";
-
-  const ROCKS = [
-    { r: 46, hp: 3, points: 30, fill: "#9aa7bd", edge: "#dbe3ef", speed: 0.5 },
-    { r: 30, hp: 2, points: 20, fill: "#8a97ad", edge: "#c8d2e0", speed: 0.68 },
-    { r: 21, hp: 1, points: 10, fill: "#78849a", edge: "#b3bdcd", speed: 0.9 },
-  ];
-
+  // ---------------------------------------------------------------- 状态
   const state = {
-    mode: "title", // title | playing | paused | over
-    score: 0,
-    best: Number(localStorage.getItem(BEST_KEY) || 0),
-    lives: 3,
-    time: 0,
-    spawnTimer: 0,
-    spawnEvery: 1.6,
-    rocks: [],
-    bullets: [],
-    sparks: [],
-    shake: 0,
-    crosshair: { x: W / 2, y: H * 0.7 },
-    cooldown: 0,
+    phase: "idle",          // idle | countdown | waiting | reveal
+    history: [],            // [{user, jev, result}]
+    count: 0,
+    userThrow: null,
+    jev: null,              // /api/decide 的结果
+    jevError: null,
+    jevPending: false,
+    jevStarted: 0,
+    deadline: 30,
+    transcript: "",
+    listening: false,
+    asr: "none",            // browser | server | none
+    micReady: false,
+    netError: null,
   };
 
-  ui.best.textContent = state.best;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const pct = (v) => Math.round((v || 0) * 100);
 
-  const rand = (a, b) => a + Math.random() * (b - a);
-
-  function syncHud() {
-    ui.score.textContent = state.score;
-    ui.lives.textContent = state.lives;
-    ui.best.textContent = state.best;
+  function tally() {
+    const counts = { user: 0, jev: 0, tie: 0 };
+    for (const r of state.history) counts[r.result] += 1;
+    return counts;
   }
 
-  function reset() {
-    state.score = 0;
-    state.lives = 3;
-    state.time = 0;
-    state.spawnTimer = 0.9;
-    state.spawnEvery = 1.6;
-    state.rocks = [];
-    state.bullets = [];
-    state.sparks = [];
-    state.shake = 0;
-    state.cooldown = 0;
-    syncHud();
-  }
-
-  function start() {
-    reset();
-    state.mode = "playing";
-  }
-
-  function gameOver() {
-    state.mode = "over";
-    if (state.score > state.best) {
-      state.best = state.score;
-      localStorage.setItem(BEST_KEY, String(state.best));
-    }
-    syncHud();
-  }
-
-  function spawnRock() {
-    const type = ROCKS[Math.floor(Math.random() * ROCKS.length)];
-    // Difficulty ramps gently for the first 40 seconds.
-    const ramp = Math.min(1, state.time / 40);
-    const r = type.r * rand(0.85, 1.15);
-    state.rocks.push({
-      x: rand(r + 20, W - r - 20),
-      y: -r - 10,
-      vx: rand(-40, 40) * (0.5 + ramp),
-      vy: rand(48, 86) * type.speed * (0.9 + ramp * 1.6),
-      r,
-      hp: type.hp,
-      maxHp: type.hp,
-      points: type.points,
-      fill: type.fill,
-      edge: type.edge,
-      spin: rand(-1, 1),
-      angle: rand(0, Math.PI * 2),
-      hit: 0,
-      shape: Array.from({ length: 9 }, () => rand(0.82, 1.14)),
-    });
-  }
-
-  function shoot(x, y) {
-    if (state.mode !== "playing" || state.cooldown > 0) return;
-    state.cooldown = 0.11;
-    const from = { x: W / 2, y: H + 6 };
-    const dx = x - from.x;
-    const dy = y - from.y;
-    const len = Math.hypot(dx, dy) || 1;
-    state.bullets.push({
-      x: from.x,
-      y: from.y,
-      vx: (dx / len) * 1500,
-      vy: (dy / len) * 1500,
-      life: 1.1,
-      px: from.x,
-      py: from.y,
-    });
-    state.shake = Math.min(6, state.shake + 2.4);
-  }
-
-  function burst(x, y, color, count, power) {
-    for (let i = 0; i < count; i++) {
-      const a = rand(0, Math.PI * 2);
-      const s = rand(40, 210) * power;
-      state.sparks.push({
-        x, y,
-        vx: Math.cos(a) * s,
-        vy: Math.sin(a) * s,
-        life: rand(0.25, 0.7),
-        max: 0.7,
-        size: rand(1.6, 4.2),
-        color,
-      });
-    }
-  }
-
-  function damageRock(rock, x, y) {
-    rock.hp -= 1;
-    rock.hit = 0.12;
-    burst(x, y, rock.edge, 6, 0.7);
-    if (rock.hp > 0) return;
-
-    state.score += rock.points;
-    burst(rock.x, rock.y, rock.fill, 18, 1.15);
-    state.shake = Math.min(12, state.shake + 5);
-    state.spawnEvery = Math.max(0.55, state.spawnEvery - 0.008);
-    rock.dead = true;
-    syncHud();
-  }
-
-  function update(dt) {
-    state.time += dt;
-    state.shake = Math.max(0, state.shake - dt * 26);
-    state.cooldown = Math.max(0, state.cooldown - dt);
-
-    if (state.mode !== "playing") return;
-
-    state.spawnTimer -= dt;
-    if (state.spawnTimer <= 0) {
-      state.spawnTimer = state.spawnEvery * rand(0.75, 1.25);
-      spawnRock();
-      if (state.time > 14 && Math.random() < 0.28) spawnRock();
-    }
-
-    for (const b of state.bullets) {
-      b.px = b.x;
-      b.py = b.y;
-      b.x += b.vx * dt;
-      b.y += b.vy * dt;
-      b.life -= dt;
-      if (b.x < -40 || b.x > W + 40 || b.y < -40 || b.y > H + 40) b.dead = true;
-    }
-
-    for (const rock of state.rocks) {
-      rock.hit = Math.max(0, rock.hit - dt);
-      rock.angle += rock.spin * dt;
-      rock.vy += 32 * dt;
-      rock.x += rock.vx * dt;
-      rock.y += rock.vy * dt;
-      if (rock.x < rock.r) { rock.x = rock.r; rock.vx = Math.abs(rock.vx); }
-      if (rock.x > W - rock.r) { rock.x = W - rock.r; rock.vx = -Math.abs(rock.vx); }
-      if (rock.y - rock.r > H) {
-        rock.dead = true;
-        state.lives -= 1;
-        state.shake = Math.min(14, state.shake + 8);
-        burst(rock.x, H - 6, "#ef476f", 14, 0.9);
-        syncHud();
-        if (state.lives <= 0) gameOver();
-      }
-    }
-
-    // Bullet / rock collisions.
-    for (const b of state.bullets) {
-      if (b.dead) continue;
-      for (const rock of state.rocks) {
-        if (rock.dead) continue;
-        if (Math.hypot(b.x - rock.x, b.y - rock.y) <= rock.r) {
-          b.dead = true;
-          damageRock(rock, b.x, b.y);
-          break;
-        }
-      }
-    }
-
-    for (const s of state.sparks) {
-      s.life -= dt;
-      s.vy += 420 * dt;
-      s.x += s.vx * dt;
-      s.y += s.vy * dt;
-      if (s.life <= 0) s.dead = true;
-    }
-
-    state.rocks = state.rocks.filter((r) => !r.dead);
-    state.bullets = state.bullets.filter((b) => !b.dead);
-    state.sparks = state.sparks.filter((s) => !s.dead);
-  }
-
-  function drawRock(rock) {
-    const scale = 1 + rock.hit * 1.6;
-    ctx.save();
-    ctx.translate(rock.x, rock.y);
-    ctx.rotate(rock.angle);
-    ctx.scale(scale, scale);
-    ctx.beginPath();
-    const n = rock.shape.length;
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2;
-      const rr = rock.r * rock.shape[i];
-      const px = Math.cos(a) * rr;
-      const py = Math.sin(a) * rr;
-      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
-    }
-    ctx.closePath();
-    const grad = ctx.createLinearGradient(-rock.r, -rock.r, rock.r, rock.r);
-    grad.addColorStop(0, rock.edge);
-    grad.addColorStop(1, rock.fill);
-    ctx.fillStyle = rock.hit > 0 ? "#ffffff" : grad;
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(11,15,22,.55)";
-    ctx.stroke();
-
-    // Craters
-    ctx.fillStyle = "rgba(11,15,22,.20)";
-    for (let i = 0; i < 3; i++) {
-      const a = (i / 3) * Math.PI * 2 + 0.6;
-      ctx.beginPath();
-      ctx.arc(Math.cos(a) * rock.r * 0.42, Math.sin(a) * rock.r * 0.42, rock.r * 0.16, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-
-    if (rock.maxHp > 1 && rock.hp < rock.maxHp) {
-      const w = rock.r * 1.7;
-      const x = rock.x - w / 2;
-      const y = rock.y - rock.r - 14;
-      ctx.fillStyle = "rgba(255,255,255,.14)";
-      ctx.fillRect(x, y, w, 5);
-      ctx.fillStyle = "#ffd166";
-      ctx.fillRect(x, y, w * (rock.hp / rock.maxHp), 5);
-    }
-  }
-
-  function drawCrosshair() {
-    const { x, y } = state.crosshair;
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,209,102,.9)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(x, y, 16, 0, Math.PI * 2);
-    ctx.moveTo(x - 26, y); ctx.lineTo(x - 8, y);
-    ctx.moveTo(x + 8, y); ctx.lineTo(x + 26, y);
-    ctx.moveTo(x, y - 26); ctx.lineTo(x, y - 8);
-    ctx.moveTo(x, y + 8); ctx.lineTo(x, y + 26);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  function drawGround() {
-    ctx.save();
-    ctx.fillStyle = "rgba(255,255,255,.06)";
-    ctx.fillRect(0, H - 8, W, 8);
-    ctx.font = "600 22px ui-sans-serif, system-ui, sans-serif";
-    ctx.fillStyle = "rgba(255,255,255,.09)";
-    ctx.textAlign = "center";
-    ctx.fillText("I  S H O O T  R O C K", W / 2, H - 26);
-    ctx.restore();
-  }
-
-  function drawTitleCard(title, lines) {
-    ctx.save();
-    ctx.fillStyle = "rgba(8,11,17,.72)";
-    ctx.fillRect(0, 0, W, H);
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#ffd166";
-    ctx.font = "700 74px ui-sans-serif, system-ui, sans-serif";
-    ctx.fillText(title, W / 2, H / 2 - 40);
-    ctx.fillStyle = "#e9eef5";
-    ctx.font = "400 27px ui-sans-serif, system-ui, sans-serif";
-    lines.forEach((line, i) => ctx.fillText(line, W / 2, H / 2 + 34 + i * 40));
-    ctx.restore();
-  }
-
+  // ---------------------------------------------------------------- 渲染
   function render() {
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, W, H);
+    renderScore();
+    renderStage();
+    renderJev();
+    renderMemory();
+    renderControls();
+    renderBanner();
+    renderFoot();
+  }
 
-    if (state.shake > 0) {
-      ctx.translate(rand(-state.shake, state.shake), rand(-state.shake, state.shake));
+  function renderScore() {
+    const t = tally();
+    $("score-you").textContent = t.user;
+    $("score-jev").textContent = t.jev;
+    $("score-tie").textContent = t.tie;
+    $("round-count").textContent = state.history.length;
+  }
+
+  function handHTML(side, throwName, tag) {
+    const pending = !throwName;
+    return '<div class="hand ' + side + (pending ? " pending" : "") + '">' +
+      '<div class="glyph">' + (throwName ? GLYPH[throwName] : "❔") + "</div>" +
+      '<div class="name">' + (throwName ? LABEL[throwName] : "…") + "</div>" +
+      '<div class="tag">' + esc(tag) + "</div></div>";
+  }
+
+  function renderStage() {
+    const el = $("stage-main");
+
+    if (state.phase === "idle") {
+      const t = tally();
+      el.innerHTML =
+        '<div class="countdown" style="font-size:44px; color:var(--ink); text-shadow:none;">准备好就说「开始」</div>' +
+        '<div class="stage-line">' +
+        (state.history.length
+          ? "第 <b>" + (state.history.length + 1) + "</b> 回合 · 之前 <b>" + t.user + ":" + t.jev + "</b>" +
+            (t.tie ? " · 平 <b>" + t.tie + "</b>" : "")
+          : "Jev 手里还没有任何历史，这是它的第一回合") +
+        "</div>";
+      return;
     }
 
-    // Backdrop stars
-    ctx.fillStyle = "rgba(255,255,255,.10)";
-    for (let i = 0; i < 46; i++) {
-      const x = ((i * 137) % W);
-      const y = ((i * 271) % (H - 40));
-      ctx.fillRect(x, y, 2, 2);
+    if (state.phase === "countdown") {
+      el.innerHTML =
+        '<div class="countdown beat" id="count-num">' + state.count + "</div>" +
+        '<div class="stage-line">说「石头剪刀布」，再喊你出的那一手<br>' +
+        (state.userThrow
+          ? '已听到：<b>' + LABEL[state.userThrow] + "</b>"
+          : "麦克风正在听…") + "</div>";
+      return;
     }
 
-    drawGround();
-    for (const rock of state.rocks) drawRock(rock);
-
-    for (const b of state.bullets) {
-      ctx.strokeStyle = "rgba(255,209,102,.85)";
-      ctx.lineWidth = 5;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(b.px, b.py);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
+    if (state.phase === "waiting") {
+      const waitingForJev = !state.jev && !state.jevError;
+      const waited = state.jevStarted ? ((Date.now() - state.jevStarted) / 1000).toFixed(0) : "0";
+      el.innerHTML =
+        '<div class="versus">' +
+          handHTML("you", state.userThrow, "你") +
+          '<div class="vs">VS</div>' +
+          handHTML("jev", state.jev ? state.jev.throw : null, "Jev") +
+        "</div>" +
+        '<div class="verdict" style="font-size:16px; color:var(--dim);">' +
+          (waitingForJev
+            ? '<span class="spinner"></span>Jev 还在判断… 已等 ' + waited + " 秒"
+            : (state.jevError ? "Jev 没给出判断" : "…")) +
+        "</div>";
+      return;
     }
 
-    for (const s of state.sparks) {
-      ctx.globalAlpha = Math.max(0, s.life / s.max);
-      ctx.fillStyle = s.color;
-      ctx.fillRect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size);
+    if (state.phase === "error") {
+      el.innerHTML =
+        '<div class="versus">' +
+          handHTML("you", state.userThrow, "你") +
+          '<div class="vs">VS</div>' +
+          handHTML("jev", null, "Jev") +
+        "</div>" +
+        '<div class="verdict" style="font-size:18px; color:var(--lose);">这一局没打完</div>' +
+        '<div class="stage-line" style="margin-top:10px; max-width:430px;">' +
+          esc(state.jevError || "") + "</div>" +
+        '<div class="stage-line" style="margin-top:6px; color:var(--dimmer);">' +
+          "重试会拿同一份历史再问一次，Jev 仍然看不到你出了什么。</div>";
+      return;
     }
-    ctx.globalAlpha = 1;
 
-    if (state.mode === "playing" || state.mode === "paused") drawCrosshair();
-
-    if (state.mode === "title") {
-      drawTitleCard("I Shoot Rock", [
-        "Smash every rock before it hits the ground.",
-        "Click or press Space to fire.",
-        "",
-        "Click to begin",
-      ]);
-    } else if (state.mode === "paused") {
-      drawTitleCard("Paused", ["Press P to resume"]);
-    } else if (state.mode === "over") {
-      drawTitleCard("Game Over", [
-        `Score ${state.score}  ·  Best ${state.best}`,
-        "",
-        "Click or press Space to play again",
-      ]);
+    if (state.phase === "reveal") {
+      const result = outcome(state.userThrow, state.jev.throw);
+      el.innerHTML =
+        '<div class="versus">' +
+          handHTML("you", state.userThrow, "你") +
+          '<div class="vs">VS</div>' +
+          handHTML("jev", state.jev.throw, "Jev") +
+        "</div>" +
+        '<div class="verdict ' + result + '">' + OUTCOME_LABEL[result] + "</div>" +
+        '<div class="stage-line" style="margin-top:8px;">说「开始」再来一局，或说「再来一个回合」清空历史</div>';
     }
   }
 
-  let last = performance.now();
-  function frame(now) {
-    const dt = Math.min(0.05, (now - last) / 1000);
-    last = now;
-    update(dt);
+  function renderJev() {
+    const el = $("jev-panel");
+    if (state.jevError) {
+      el.innerHTML = '<div class="empty">' + esc(state.jevError) + "</div>";
+      return;
+    }
+    if (!state.jev) {
+      el.innerHTML = '<div class="empty">' +
+        (state.jevPending ? "正在问 Jev…" : "开始一局后，这里显示它对下一手的判断。") +
+        "</div>";
+      return;
+    }
+
+    const d = state.jev;
+    const order = THROWS.slice().sort((a, b) => d.probabilities[b] - d.probabilities[a]);
+    const rows = order.map((thr) => {
+      const p = d.probabilities[thr];
+      return '<div class="bar-row">' +
+        '<span class="k">' + LABEL[thr] + "</span>" +
+        '<span class="track' + (thr === d.throw ? " best" : "") + '"><span style="width:' + pct(p) + '%"></span></span>' +
+        '<span class="v">' + pct(p) + "%</span></div>";
+    }).join("");
+
+    const evRows = THROWS.map((thr) =>
+      "<dt>出" + LABEL[thr] + "</dt><dd>" +
+      (d.expected[thr] >= 0 ? "+" : "−") + Math.abs(d.expected[thr]).toFixed(2) + "</dd>").join("");
+
+    el.innerHTML =
+      '<div class="bars-row">' + rows + "</div>" +
+      '<div class="stage-line" style="color:var(--dim); font-size:13px;">' +
+        "它认为你会出 <b>" + LABEL[order[0]] + "</b>（" + pct(d.probabilities[order[0]]) + "%）<br>" +
+        "所以它出 <b style=\"color:var(--accent)\">" + LABEL[d.throw] + "</b>" +
+      "</div>" +
+      '<dl class="kv" style="margin-top:14px;">' + evRows + "</dl>" +
+      '<div class="note">上面是每手的<b>期望净胜分</b>（赢的概率 − 输的概率），取最高的一手出拳。' +
+        "Jev 只负责说出它对你下一手的判断，出拳在规则内算出来 —— 这样它越是确定，出的拳就越是能赢你。" +
+      "</div>" +
+      (d.direct
+        ? '<div class="note">顺带问它「你自己出什么」，它答的是 <b>' + LABEL[d.direct] + "</b>，" +
+          (d.agrees ? "这次和算出来的那一手一致。" : "这次和算出来的那一手<b>不一致</b>。") +
+          " 实测它这一问并不可靠，所以没让它决定出拳。</div>"
+        : "") +
+      '<details><summary>Jev 收到的 state 原文</summary><pre>' + esc(d.state) + "</pre></details>" +
+      '<div class="note">' + esc(d.model) + " · " +
+        (d.cached ? "缓存命中" : "延迟 " + d.latency_ms + "ms") +
+        (d.usage ? " · " + d.usage.input_tokens + " in / " + d.usage.output_tokens + " out" : "") +
+      "</div>";
+  }
+
+  function renderMemory() {
+    const el = $("memory");
+    if (!state.history.length) {
+      el.innerHTML = '<div class="empty">还是空的。每打完一局，你和 Jev 的出拳和输赢都会追加到这里，' +
+        "下一局开始时整段历史会被写进 Jev 的 state。</div>";
+      return;
+    }
+    el.innerHTML = state.history.map((r, i) =>
+      '<div class="mem-row">' +
+        '<span class="idx">' + (i + 1) + "</span>" +
+        '<span class="u">' + GLYPH[r.user] + " " + LABEL[r.user] + "</span>" +
+        '<span class="j">' + GLYPH[r.jev] + " " + LABEL[r.jev] + "</span>" +
+        '<span class="r ' + r.result + '">' + OUTCOME_LABEL[r.result] + "</span>" +
+      "</div>").join("");
+  }
+
+  function renderControls() {
+    const el = $("controls");
+
+    if (state.phase === "error") {
+      el.innerHTML = '<button class="primary" id="btn-retry">重试这一局</button>' +
+        '<button class="ghost" id="btn-give-up">放弃，回到开始</button>';
+      $("btn-retry").onclick = retryRound;
+      $("btn-give-up").onclick = () => { state.phase = "idle"; state.jevError = null; render(); };
+      return;
+    }
+
+    const canStart = state.phase === "idle";
+    // 倒计时结束后仍然可以手动补 —— 否则语音一旦没识别到，人就卡死在 waiting。
+    const canThrow = (state.phase === "countdown" || state.phase === "waiting") && !state.userThrow;
+    el.innerHTML =
+      '<button class="primary" id="btn-start"' + (canStart ? "" : " disabled") + ">开始</button>" +
+      THROWS.map((thr) =>
+        '<button class="throw" data-throw="' + thr + '"' + (canThrow ? "" : " disabled") + ">" +
+        '<span class="g">' + GLYPH[thr] + "</span>" + LABEL[thr] + "</button>").join("");
+
+    $("btn-start").onclick = startCountdown;
+    el.querySelectorAll("[data-throw]").forEach((b) => {
+      b.onclick = () => submitThrow(b.dataset.throw);
+    });
+  }
+
+  function renderBanner() {
+    const el = $("banner");
+    if (state.netError) {
+      el.innerHTML = '<div class="banner err">' + esc(state.netError) + "</div>";
+      return;
+    }
+    el.innerHTML = "";
+  }
+
+  function renderFoot() {
+    const bits = [];
+    bits.push(state.asr === "browser"
+      ? '<span class="status-dot ok"></span>语音识别：浏览器内置（Web Speech）'
+      : state.asr === "server"
+        ? '<span class="status-dot ok"></span>语音识别：服务器端命令'
+        : '<span class="status-dot warn"></span>语音识别不可用 —— 用下面或右边的按钮手动出拳');
+    bits.push("说「开始」开局 · 说「石头剪刀布」+ 出拳 · 说「再来一个回合」清空历史");
+    $("foot").innerHTML = bits.join("<br>");
+  }
+
+  // ---------------------------------------------------------------- 一局
+  function startCountdown() {
+    if (state.phase !== "idle") return;
+    state.phase = "countdown";
+    state.count = 3;
+    state.userThrow = null;
+    state.jev = null;
+    state.jevError = null;
+    state.jevPending = true;
+    state.transcript = "";
     render();
-    requestAnimationFrame(frame);
+
+    askJev();                        // 和倒计时并排跑，别让它拖后腿
+    const timer = setInterval(() => {
+      state.count -= 1;
+      if (state.count > 0) {
+        renderStage();
+        return;
+      }
+      clearInterval(timer);
+      state.phase = "waiting";
+      render();
+      maybeFinish();
+    }, 1000);
   }
 
-  function pointerToCanvas(evt) {
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: ((evt.clientX - rect.left) / rect.width) * W,
-      y: ((evt.clientY - rect.top) / rect.height) * H,
+  async function askJev() {
+    // 服务器那边有总预算，这里再兜一层：任何情况下都不能让牌桌无限期停住。
+    const controller = new AbortController();
+    const limitMs = (state.deadline + 6) * 1000;
+    const cut = setTimeout(() => controller.abort(), limitMs);
+    state.jevStarted = Date.now();
+    startWaitTicker();
+    try {
+      const res = await fetch("/api/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ history: state.history }),
+        signal: controller.signal,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+      state.jev = data;
+      state.netError = null;
+    } catch (err) {
+      state.jevError = err.name === "AbortError"
+        ? "等了 " + Math.round(limitMs / 1000) + " 秒 Jev 还没回答，这一局先停下。"
+        : "Jev 判断失败：" + err.message;
+    } finally {
+      clearTimeout(cut);
+      stopWaitTicker();
+      state.jevPending = false;
+      if (state.phase === "waiting" || state.phase === "reveal") {
+        render();
+        maybeFinish();
+      } else {
+        renderJev();
+      }
+    }
+  }
+
+  let waitTicker = null;
+
+  function startWaitTicker() {
+    stopWaitTicker();
+    waitTicker = setInterval(() => {
+      if (state.jevPending && (state.phase === "waiting" || state.phase === "countdown")) {
+        renderStage();
+      } else {
+        stopWaitTicker();
+      }
+    }, 500);
+  }
+
+  function stopWaitTicker() {
+    if (waitTicker) clearInterval(waitTicker);
+    waitTicker = null;
+  }
+
+  function submitThrow(throwName) {
+    if (state.phase !== "countdown" && state.phase !== "waiting") return;
+    if (state.userThrow) return;
+    state.userThrow = throwName;
+    render();
+    maybeFinish();
+  }
+
+  function maybeFinish() {
+    if (state.phase !== "waiting") return;
+    // 没听到出拳就继续等 —— 语音没接上时，右边的按钮还能补。
+    if (!state.userThrow) return;
+    // Jev 挂了就别进 reveal：那里要读 state.jev.throw。停下来等人点重试，
+    // 而不是悄悄把这一局丢掉。
+    if (state.jevError) {
+      state.phase = "error";
+      render();
+      return;
+    }
+    if (!state.jev) return;
+
+    state.history.push({
+      user: state.userThrow,
+      jev: state.jev.throw,
+      result: outcome(state.userThrow, state.jev.throw),
+    });
+    state.phase = "reveal";
+    render();
+    setTimeout(() => {
+      if (state.phase === "reveal") {
+        state.phase = "idle";
+        render();
+      }
+    }, 2600);
+  }
+
+  function newSession() {
+    state.history = [];
+    state.jev = null;
+    state.jevError = null;
+    state.userThrow = null;
+    state.phase = "idle";
+    render();
+    // 「清理历史 state 后进入下一个回合」—— 清完直接进倒计时。
+    startCountdown();
+  }
+
+  function retryRound() {
+    if (state.phase !== "error") return;
+    state.jevError = null;
+    state.jevPending = true;
+    state.phase = "waiting";
+    render();
+    askJev();
+  }
+
+  // ---------------------------------------------------------------- 语音
+  function interpret(text) {
+    fetch("/api/interpret", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    })
+      .then((r) => r.json())
+      .then((parsed) => {
+        if (parsed.command === "new_session") return newSession();
+        if (parsed.command === "start") {
+          // 结算画面里说「开始」也认，不用干等那 2.6 秒。
+          if (state.phase === "reveal") state.phase = "idle";
+          if (state.phase === "idle") return startCountdown();
+        }
+        if (parsed.throw) submitThrow(parsed.throw);
+      })
+      .catch(() => {});
+  }
+
+  // ---------------------------------------------------------------- 语音
+  // 两条路，按可用性挑：
+  //   browser —— Web Speech API。零配置，但它走 Google 的服务器，中国大陆用不了。
+  //   server  —— 录一段音频丢给 /api/asr，由服务器上配好的识别命令转写。
+  // 先试 browser；它报「服务不可用」时退到 server；两条都不通就只剩按钮。
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognizer = null;
+  let audioStream = null;
+  let serverAsrReady = false;
+
+  function applyParsed(parsed) {
+    if (!parsed) return;
+    if (parsed.command === "new_session") return newSession();
+    if (parsed.command === "start") {
+      // 结算画面里说「开始」也认，不用干等那 2.6 秒。
+      if (state.phase === "reveal") state.phase = "idle";
+      if (state.phase === "idle") return startCountdown();
+    }
+    if (parsed.throw) submitThrow(parsed.throw);
+  }
+
+  function interpret(text) {
+    fetch("/api/interpret", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    })
+      .then((r) => r.json())
+      .then(applyParsed)
+      .catch(() => {});
+  }
+
+  function startBrowserAsr() {
+    if (!SpeechRecognition) return false;
+    state.asr = "browser";
+    recognizer = new SpeechRecognition();
+    recognizer.lang = "zh-CN";
+    recognizer.continuous = true;
+    recognizer.interimResults = true;
+
+    recognizer.onresult = (evt) => {
+      let interim = "";
+      for (let i = evt.resultIndex; i < evt.results.length; i++) {
+        const result = evt.results[i];
+        if (result.isFinal) interpret(result[0].transcript);
+        else interim += result[0].transcript;
+      }
+      state.transcript = interim;
+      renderTranscript();
+    };
+    recognizer.onerror = (evt) => {
+      if (evt.error === "not-allowed" || evt.error === "service-not-allowed") {
+        // 典型的中国大陆 Chrome：有 API，但服务连不上。有服务器识别就换过去。
+        if (serverAsrReady) {
+          state.asr = "server";
+          state.transcript = "浏览器语音服务不可用，已改用服务器端识别。";
+          armServerAsr();
+          renderFoot();
+          return;
+        }
+        state.asr = "none";
+        state.transcript = "麦克风被拒绝，或浏览器语音服务不可用（在中国大陆 Chrome 用不了 Google 的识别服务）。" +
+          "可以配 I_SHOOT_ROCK_ASR_CMD 走服务器端识别，或者直接用按钮出拳。";
+        renderTranscript();
+        renderFoot();
+      }
+    };
+    recognizer.onend = () => {
+      state.listening = false;
+      if (state.asr === "browser") {
+        try { recognizer.start(); state.listening = true; } catch (e) { /* 已经在跑了 */ }
+      }
+    };
+    try {
+      recognizer.start();
+      state.listening = true;
+      renderFoot();
+      return true;
+    } catch (e) {
+      state.asr = "none";
+      return false;
+    }
+  }
+
+  // 服务器端识别：靠音量做端点检测，把「一段话」切出来发走。
+  // 这样不用等固定时长，也不用手动按开始/结束。
+  const VAD = { level: 0.05, silenceMs: 700, maxMs: 6000, minMs: 250 };
+  let serverAsrArmed = false;
+
+  function armServerAsr() {
+    // 麦克风流和 /api/health 谁先到不确定，所以两边都来叫一次，谁最后到谁把它装上。
+    if (serverAsrArmed || !serverAsrReady || !audioStream || !window.MediaRecorder) return;
+    serverAsrArmed = true;
+    state.asr = "server";
+    renderFoot();
+
+    const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg"]
+      .find((m) => MediaRecorder.isTypeSupported(m)) || "";
+    const ext = mime.indexOf("ogg") >= 0 ? "ogg" : "webm";
+
+    let recorder = null, chunks = [], startedAt = 0, lastLoud = 0, speaking = false;
+
+    const begin = () => {
+      try { recorder = new MediaRecorder(audioStream, mime ? { mimeType: mime } : undefined); }
+      catch (e) { return; }
+      chunks = [];
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      recorder.onstop = () => {
+        if (performance.now() - startedAt < VAD.minMs || !chunks.length) return;
+        const blob = new Blob(chunks, { type: mime || "audio/webm" });
+        if (blob.size < 1200) return;              // 一点点杂音，不值得发
+        fetch("/api/asr?ext=" + ext, { method: "POST", body: blob })
+          .then((r) => r.json())
+          .then((data) => {
+            if (!data.text) return;
+            state.transcript = data.text;
+            renderTranscript();
+            applyParsed(data.parsed);
+          })
+          .catch(() => {});
+      };
+      startedAt = performance.now();
+      recorder.start();
+      speaking = true;
+    };
+
+    const end = () => {
+      speaking = false;
+      if (recorder && recorder.state === "recording") recorder.stop();
+      recorder = null;
+    };
+
+    window.__ispVad = (rms) => {
+      if (state.asr !== "server") return;        // 浏览器识别能用时，别去抢麦克风
+      const now = performance.now();
+      const loud = rms > VAD.level;
+      if (loud) lastLoud = now;
+      if (!speaking && loud) begin();
+      else if (speaking && (now - lastLoud > VAD.silenceMs || now - startedAt > VAD.maxMs)) end();
     };
   }
 
-  canvas.addEventListener("pointermove", (evt) => {
-    const p = pointerToCanvas(evt);
-    state.crosshair.x = p.x;
-    state.crosshair.y = p.y;
-  });
+  function renderTranscript() {
+    const el = $("transcript");
+    el.innerHTML = state.transcript ? "听到：<b>" + esc(state.transcript) + "</b>" : "";
+  }
 
-  canvas.addEventListener("pointerdown", (evt) => {
-    evt.preventDefault();
-    const p = pointerToCanvas(evt);
-    state.crosshair.x = p.x;
-    state.crosshair.y = p.y;
-    if (state.mode === "playing") shoot(p.x, p.y);
-    else if (state.mode === "title" || state.mode === "over") start();
-    else if (state.mode === "paused") state.mode = "playing";
-  });
-
-  window.addEventListener("keydown", (evt) => {
-    if (evt.code === "Space") {
-      evt.preventDefault();
-      if (state.mode === "playing") shoot(state.crosshair.x, state.crosshair.y);
-      else if (state.mode === "title" || state.mode === "over") start();
-      else if (state.mode === "paused") state.mode = "playing";
-    } else if (evt.key === "p" || evt.key === "P") {
-      if (state.mode === "playing") state.mode = "paused";
-      else if (state.mode === "paused") state.mode = "playing";
-    } else if (evt.key === "Escape" && state.mode === "paused") {
-      state.mode = "playing";
+  // 麦克风电平，顺便把音量算出来喂给端点检测 —— 「声音录入」这件事得看得见。
+  async function startMeter() {
+    const bars = $("mic-bars");
+    for (let i = 0; i < 14; i++) bars.appendChild(document.createElement("i"));
+    const nodes = bars.querySelectorAll("i");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStream = stream;
+      state.micReady = true;
+      $("mic-label").textContent = "正在录音";
+      bars.classList.add("live");
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      const freq = new Uint8Array(analyser.frequencyBinCount);
+      const wave = new Uint8Array(analyser.fftSize);
+      (function pump() {
+        analyser.getByteFrequencyData(freq);
+        for (let i = 0; i < nodes.length; i++) {
+          const v = freq[Math.floor(i * freq.length / nodes.length)] / 255;
+          nodes[i].style.height = Math.max(4, 4 + v * 22) + "px";
+        }
+        analyser.getByteTimeDomainData(wave);
+        let sum = 0;
+        for (let i = 0; i < wave.length; i++) { const d = (wave[i] - 128) / 128; sum += d * d; }
+        if (window.__ispVad) window.__ispVad(Math.sqrt(sum / wave.length));
+        requestAnimationFrame(pump);
+      })();
+      armServerAsr();
+    } catch (e) {
+      state.micReady = false;
+      $("mic-label").textContent = "麦克风未授权";
     }
-  });
+  }
 
-  window.addEventListener("blur", () => {
-    if (state.mode === "playing") state.mode = "paused";
-  });
-
-  requestAnimationFrame(frame);
+  // ---------------------------------------------------------------- 启动
+  $("btn-new-session").onclick = newSession;
+  // 先问服务器认不认语音，再决定走哪条路；两条都不通就只剩按钮。
+  fetch("/api/health")
+    .then((r) => r.json())
+    .then((h) => {
+      if (!h.jev_key) {
+        state.netError = "服务器没有读到 Jev 密钥。请 export JEV_API_KEY=… 后重启 server.py。";
+      }
+      if (h.deadline) state.deadline = h.deadline;
+      serverAsrReady = h.asr === "command";
+      if (!startBrowserAsr()) state.asr = serverAsrReady ? "server" : "none";
+      armServerAsr();
+      render();
+    })
+    .catch(() => {
+      state.netError = "连不上本地服务器。请先运行 python3 server.py，再打开这个页面。";
+      render();
+    });
+  startMeter();
+  render();
 })();
 </script>
 </body>

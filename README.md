@@ -1,36 +1,160 @@
-# I Shoot Rock
+# 石头剪刀布 · 对 Jev
 
-A tiny arcade shooter that lives in one HTML file. Rocks fall, you shoot them, gravity wins eventually.
+和 [Jev](https://typesafe.ai)（TypeSafe 的 System One 决策模型）猜拳。你说话出拳，
+它根据你们之前每一局的出拳和输赢来判断你接下来会出什么。
 
-## Play
+它不是聊天模型：你给它一段 `state` 和一组带类型的问题，它回结构化答案。所以它没法
+「作弊看你出了什么」—— 它的判断在你出声之前就已经算完并锁定了。
 
-Open `index.html` in any modern browser — no build step, no dependencies, no server.
-
+```bash
+export JEV_API_KEY="..."      # 或 TYPESAFE_API_KEY
+python3 server.py             # 然后打开 http://127.0.0.1:8765
 ```
-open index.html      # macOS
+
+先验一下密钥能不能用：
+
+```bash
+python3 server.py --check
 ```
 
-## Controls
+只有标准库，不需要 `pip install`。
 
-| Action | Input |
+## 怎么玩
+
+| 你说 | 会发生什么 |
 | --- | --- |
-| Aim | Move the mouse / drag on touch |
-| Shoot | Left click, or `Space` |
-| Pause / resume | `P` (auto-pauses when the window loses focus) |
-| Restart | Click or `Space` on the title and game-over screens |
+| 「开始」 | 屏幕上走 3 → 2 → 1，同时 Jev 开始思考 |
+| 「石头剪刀布」，然后喊「石头」/「剪刀」/「布」 | 你这一手被录进去 |
+| 「再来一个回合」 | 清空历史，直接进下一回合 |
 
-## Rules
+倒计时结束、两边都齐了就开牌。之后说「开始」再来一局。
 
-- Three lives. A rock that reaches the ground costs one.
-- Big rocks take 3 hits, medium 2, small 1. Each hit shows a health bar.
-- Score: 30 / 20 / 10 points for small, medium, and large rocks.
-- Spawn rate and fall speed ramp up over the first ~40 seconds.
-- Your best score is saved to `localStorage`.
+界面右下角一直列着历史。每打完一局，你和 Jev 的出拳和输赢都会追加进去，**下一局开始时
+整段历史会被写进 Jev 的 state**。这就是它的 memory。点「再来一个回合」就清空。
 
-## Structure
+麦克风没接通也能玩：倒计时期间和之后都能点按钮出拳。
 
-- `index.html` — everything: markup, styles, and the canvas game loop.
+## 一个实测出来的设计决定
 
-## Notes
+第一版是直接问 Jev「你出什么」。**这条路不通。** 实测：
 
-Rendering is plain Canvas 2D with a fixed `requestAnimationFrame` loop and delta-time updates, so the game speed is independent of display refresh rate.
+```
+告诉它「人连续三次出石头」
+  它的判断：人出石头 98%
+  它自己选：剪刀          ← 而剪刀是输给石头的
+```
+
+它的**判断**很准（人连出石头 → 它给石头 0.72–0.98；人连出剪刀 → 剪刀 0.67；
+人出石头剪刀布循环 → 它也能看出来）。但把判断换算成一步好棋这件事，它做得不稳定 ——
+上面那组里它给出的「剪刀」是直接输掉的一手。
+
+所以现在分开：**Jev 只负责说出它对你下一手的信念分布**，出拳由规则算出 ——
+取期望净胜分（赢的概率 − 输的概率）最高的那一手。
+
+```
+Jev 判断：石头 78% · 布 19% · 剪刀 3%
+  出石头   −0.16
+  出布     +0.75   ← 出这个
+  出剪刀   −0.59
+```
+
+出拳依然完全由 Jev 决定，只是它决定的方式是给概率而不是给动作。界面里「Jev 的判断」
+那一栏会把它**顺带直接选的那一手**也显示出来（同一次 API 调用，不额外花钱），
+和算出来的一致或不一致都照实写 —— 那是模型真实的样子。
+
+`state` 是中文写的，实测比英文略更果断（同一个局面 0.76 vs 0.67）：
+
+```
+石头剪刀布的规则：石头胜剪刀，剪刀胜布，布胜石头。……
+已完成的回合（共 3 回合）：
+第 1 回合：用户出石头，你出布，结果：Jev 赢了（布 胜 石头）。
+第 2 回合：用户出剪刀，你出石头，结果：Jev 赢了（石头 胜 剪刀）。
+第 3 回合：用户出布，你出布，结果：平局（双方都出布）。
+```
+
+## 语音
+
+按顺序试两条路，第一条通了就不试第二条：
+
+1. **浏览器内置**（Web Speech API）。零配置。但它走 Google 的服务器，
+   **中国大陆的 Chrome 用不了**，会直接报服务不可用。
+2. **服务器端识别**。浏览器把音频录一段丢给 `/api/asr`，由你配的命令转写。
+   这条能在中国大陆用。
+
+配第二条（以阿里云百炼的 `bl` 为例）：
+
+```bash
+bl auth login --api-key "$DASHSCOPE_API_KEY"        # 先装好 bl
+export I_SHOOT_ROCK_ASR_CMD='bl speech recognize --url {wav} --output json'
+python3 server.py
+```
+
+`{wav}` 会被换成临时音频文件路径，命令经由 shell 执行，**往 stdout 打一行文字**即可。
+如果那个工具打的是 JSON，接一个抽取：
+
+```bash
+export I_SHOOT_ROCK_ASR_CMD='bl speech recognize --url {wav} --output json | jq -r .text'
+```
+
+> 这条路径的**接线**是实测过的：用假麦克风 + 一个 `printf '石头剪刀布，剪刀'` 的假识别器
+> 跑通了「音频 → 端点检测 → /api/asr → 文字 → 出拳 → 结算」全程。
+> 但 **`bl` 本身没在这里验证过**（这个环境里没装 `bl`，也没有 DashScope 密钥），
+> 所以上面那条命令的子命令和输出形状需要你按 `bl --help` 核一下。
+
+服务器端识别靠自己算音量做端点检测：声音起来就开录，静下来 0.7 秒就把这一段发走
+（最长 6 秒截断），所以不用手动按开始/结束。
+
+## 「石头剪刀布」里含着三种出拳的名字
+
+这是语音部分最容易错的地方：「石头剪刀布」这五个字里同时有石头、剪刀、布。
+不管的话，一句口诀会被当成出了三次拳。
+
+所以口诀先被剥掉，**剩下的部分里最后一个出拳词**才算数：
+
+| 听到 | 出拳 |
+| --- | --- |
+| 石头剪刀布 | 没有（只是口诀） |
+| 石头剪刀布，剪刀 | 剪刀 |
+| 石头剪刀布，我出布 | 布 |
+| 石头，不对，布 | 布（取最后一个，允许改口） |
+| 剪子 / 锤子 / 包袱 | 剪刀 / 石头 / 布 |
+
+这段逻辑在 `game.py` 的 `parse_utterance`，有 14 个用例盯着它。
+
+## 文件
+
+| 文件 | 作用 |
+| --- | --- |
+| `game.py` | 纯逻辑：规则、`state` 原文、从信念到出拳的算术、语音文本解析 |
+| `server.py` | 本地服务器：代理 Jev（密钥不出服务器）、识别转发、静态页面 |
+| `index.html` | 页面：倒计时、牌桌、记忆、Jev 的判断、语音接线 |
+| `test_game.py` | `game.py` 的单元测试（48 个，不联网） |
+| `test_server.py` | `server.py` 的测试（23 个，网络被替换掉） |
+
+```bash
+python3 test_game.py && python3 test_server.py
+```
+
+## 实测的环境脾气
+
+- **Jev 会 503 和 529。** 529 是上游繁忙（`"error_type":"system_overloaded"`）。
+  两者都必须重试 —— 第一版漏了 529，于是「上游忙」被当成「请求有毛病」直接放弃。
+- **并发会被打回来。** 6 个并发请求里有直接 503 的。游戏本身一次只发一个。
+- **但等待必须有上限。** 上游慢起来是分钟级的，而这是给人玩的牌桌，
+  等两分钟比直接失败更糟。所以服务器有 30 秒总预算（`I_SHOOT_ROCK_JEV_DEADLINE`），
+  浏览器再兜一层超时；失败会停下来说清楚，并给一个「重试这一局」——
+  重试拿的是**同一份历史**，Jev 仍然看不到你出了什么。
+- 典型延迟几百毫秒，正好藏在 3 秒倒计时里（实测一次 747ms）。
+
+## 缓存
+
+`(url, body)` 哈希后存本地 SQLite。这个端点几乎是纯函数（同一份 state 重问一次，
+实测相关 0.997），所以命中的是「重放一个已经发生过的回答」，不是近似。失败一律不写：
+把一次超时缓存下来，就等于把网络坏的一分钟变成永久的错误答案。
+
+`I_SHOOT_ROCK_CACHE=0` 关掉，`I_SHOOT_ROCK_CACHE_PATH` 换位置。
+
+## 其它
+
+- 密钥只在服务器进程里。浏览器只跟 `127.0.0.1` 说话，页面拿不到 key。
+- 记忆只存在浏览器里（内存）。刷新页面历史就没了 —— 没有做得持久化。
