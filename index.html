@@ -6,204 +6,255 @@
 <link rel="icon" href="data:,">
 <title>石头剪刀布 · 对 Jev</title>
 <style>
+  /* 视觉语言取自 typesafe.ai：纸 #FEFEFE / 墨 #1E1E1E / 粉 #F386A1，
+     半调点阵的抖动渐变天空条，以及 Win95 的窗口、立体斜面和直角。 */
   :root {
-    --bg: #0b0f16;
-    --panel: rgba(255,255,255,.035);
-    --line: rgba(255,255,255,.09);
-    --ink: #e9eef5;
-    --dim: #8d97a8;
-    --dimmer: #5d6675;
-    --accent: #ffd166;
-    --you: #5ec2ff;
-    --jev: #b98bff;
-    --win: #4ade80;
-    --lose: #f2555a;
-    --tie: #94a3b8;
+    color-scheme: light dark;
+    --paper: #FEFEFE;
+    --ink: #1E1E1E;
+    --pink: #F386A1;
+    --face: #DEDEDE;
+    --face-low: #C4C4C4;
+    --field: #FFFFFF;
+    --bev-hi: #FEFEFE;
+    --bev-lo: #9A9A9A;
+    --bev-hi2: #FEFEFE;
+    --bev-lo2: #6E6E6E;
+    --muted: #6B6B6B;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "JetBrains Mono", "PingFang SC", monospace;
+    --sans: "Die Grotesk C Medium", Inter, -apple-system, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #1E1E1E;
+      --ink: #FEFEFE;
+      --face: #2B2B2B;
+      --face-low: #202020;
+      --field: #161616;
+      --bev-hi: #565656;
+      --bev-lo: #0C0C0C;
+      --bev-hi2: #6E6E6E;
+      --bev-lo2: #000000;
+      --muted: #A6A6A6;
+    }
   }
   * { box-sizing: border-box; }
-  html, body {
-    margin: 0;
-    min-height: 100%;
-    background: radial-gradient(120% 80% at 50% -10%, #172232 0%, var(--bg) 55%);
+  html, body { margin: 0; }
+  body {
+    background: var(--paper);
     color: var(--ink);
-    font: 15px/1.6 ui-sans-serif, -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    font: 13px/1.6 var(--mono);
     -webkit-font-smoothing: antialiased;
   }
-  .app { max-width: 1080px; margin: 0 auto; padding: 22px 20px 40px; }
 
-  /* ---------- 顶栏 ---------- */
-  header { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 18px; }
-  h1 { font-size: 19px; margin: 0; letter-spacing: .01em; font-weight: 650; }
-  h1 small { color: var(--dimmer); font-weight: 400; font-size: 13px; margin-left: 8px; }
-  .scoreboard { margin-left: auto; display: flex; gap: 10px; align-items: stretch; }
-  .score-chip {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
-    padding: 7px 13px; min-width: 78px; text-align: center;
+  /* ---------------- 抖动渐变天空条 ---------------- */
+  /* 这条粉色的天空永远是「粉纸 + 墨点」，不跟着深色主题翻 —— 它是页面的
+     招牌，翻转之后变成白点压在粉上，标题反而糊掉了。把变量就地钉住，
+     里面的标题、计分板和静音按钮就都从这套颜色里取。 */
+  .sky {
+    position: relative; background: var(--pink); overflow: hidden;
+    --ink: #1E1E1E; --paper: #FEFEFE; --face: #DEDEDE; --field: #FFFFFF; --muted: #6B6B6B;
+    --bev-hi: #FEFEFE; --bev-lo: #9A9A9A; --bev-hi2: #FEFEFE; --bev-lo2: #6E6E6E;
   }
-  .score-chip .who { font-size: 11px; color: var(--dim); letter-spacing: .06em; }
-  .score-chip .n { font-size: 21px; font-variant-numeric: tabular-nums; font-weight: 650; line-height: 1.2; }
-  .score-chip.you .n { color: var(--you); }
-  .score-chip.jev .n { color: var(--jev); }
-  .score-chip.tie .n { color: var(--tie); }
-
-  /* ---------- 布局 ---------- */
-  .grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; align-items: start; }
-  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
-
-  .card {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px;
+  .sky canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .sky-inner {
+    position: relative; max-width: 1100px; margin: 0 auto;
+    padding: 22px 22px 58px; display: flex; align-items: flex-start; gap: 18px; flex-wrap: wrap;
   }
-  .card h2 {
-    font-size: 12px; letter-spacing: .1em; color: var(--dim); margin: 0 0 14px;
-    font-weight: 600; text-transform: uppercase;
+  h1 {
+    margin: 0; font: 500 clamp(26px, 5vw, 46px)/1 var(--sans);
+    letter-spacing: -.02em; color: var(--ink);
   }
+  h1 span { font: 400 13px var(--mono); letter-spacing: 0; margin-left: 10px; opacity: .72; }
+  .scoreboard { margin-left: auto; display: flex; gap: 8px; }
+  .chip {
+    background: var(--face); color: var(--ink); min-width: 62px; padding: 5px 9px 4px;
+    box-shadow: inset -1px -1px 0 0 var(--bev-hi), inset 1px 1px 0 0 var(--bev-lo2),
+                inset -2px -2px 0 0 var(--bev-hi), inset 2px 2px 0 0 var(--bev-lo);
+    text-align: center;
+  }
+  .chip b { display: block; font: 700 19px/1.15 var(--mono); font-variant-numeric: tabular-nums; }
+  .chip span { font-size: 10px; letter-spacing: .1em; opacity: .7; }
+  .chip.you b { color: var(--pink); }
+  .chip.you { background: var(--ink); color: var(--paper); }
+  .chip.you span { opacity: .8; }
 
-  /* ---------- 舞台 ---------- */
+  /* ---------------- Win95 窗口 ---------------- */
+  .app { max-width: 1100px; margin: 0 auto; padding: 20px 22px 44px; }
+  .grid { display: grid; grid-template-columns: 1.32fr 1fr; gap: 14px; align-items: start; }
+  .col { display: grid; gap: 14px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .win {
+    background: var(--face);
+    padding: 3px;
+    box-shadow: inset -1px -1px 0 0 var(--bev-lo), inset 1px 1px 0 0 var(--bev-hi),
+                inset -2px -2px 0 0 var(--bev-lo2), inset 2px 2px 0 0 var(--bev-hi2);
+  }
+  .titlebar {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--ink); color: var(--paper);
+    padding: 3px 3px 3px 7px; margin-bottom: 3px;
+    font: 700 12px/1.45 var(--mono); letter-spacing: .04em;
+  }
+  .titlebar .tb-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tb-ctrls { display: flex; gap: 2px; pointer-events: none; }
+  .tb-ctrls i {
+    width: 16px; height: 14px; display: grid; place-items: center;
+    background: var(--face); color: var(--ink);
+    font: 700 10px/1 var(--mono); font-style: normal;
+    box-shadow: inset -1px -1px 0 0 var(--bev-lo), inset 1px 1px 0 0 var(--bev-hi);
+  }
+  .win-body { padding: 12px; }
+
+  /* ---------------- 牌桌 ---------------- */
   .stage {
-    min-height: 340px; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; text-align: center; position: relative;
-    gap: 6px; padding: 26px 18px;
+    background: var(--field); min-height: 320px; padding: 22px 16px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; gap: 4px;
+    box-shadow: inset 1px 1px 0 0 var(--bev-lo2), inset -1px -1px 0 0 var(--bev-hi),
+                inset 2px 2px 0 0 var(--bev-lo), inset -2px -2px 0 0 var(--bev-hi2);
   }
   .countdown {
-    font-size: 116px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
-    color: var(--accent); text-shadow: 0 0 46px rgba(255,209,102,.4);
+    font: 700 clamp(64px, 13vw, 118px)/1 var(--sans); color: var(--pink);
+    letter-spacing: -.04em; font-variant-numeric: tabular-nums;
   }
-  .countdown.beat { animation: pop .38s ease-out; }
-  @keyframes pop { 0% { transform: scale(1.24); opacity: .35; } 100% { transform: scale(1); opacity: 1; } }
-  .stage-line { color: var(--dim); font-size: 14px; }
-  .stage-line b { color: var(--ink); font-weight: 600; }
+  .countdown.beat { animation: pop .34s steps(4, end); }
+  @keyframes pop { from { transform: scale(1.22); opacity: .4; } to { transform: scale(1); opacity: 1; } }
+  .stage-line { font-size: 12.5px; color: var(--muted); }
+  .stage-line b { color: var(--ink); }
 
-  .versus { display: flex; align-items: center; justify-content: center; gap: 30px; margin: 6px 0 4px; }
-  .hand { text-align: center; min-width: 112px; }
-  .hand .glyph { font-size: 62px; line-height: 1.05; filter: saturate(.92); }
-  .hand .name { font-size: 15px; font-weight: 600; }
-  .hand.you .name { color: var(--you); }
-  .hand.jev .name { color: var(--jev); }
-  .hand .tag { font-size: 11px; color: var(--dimmer); letter-spacing: .07em; }
-  .hand.pending .glyph { opacity: .22; }
-  .vs { font-size: 13px; color: var(--dimmer); letter-spacing: .12em; }
+  .versus { display: flex; align-items: stretch; justify-content: center; gap: 12px; margin: 4px 0 2px; }
+  .hand { min-width: 108px; padding: 9px 12px 7px; background: var(--field);
+          box-shadow: inset -1px -1px 0 0 var(--bev-hi), inset 1px 1px 0 0 var(--bev-lo2),
+                      inset -2px -2px 0 0 var(--bev-hi), inset 2px 2px 0 0 var(--bev-lo); }
+  .hand .glyph { font: 700 34px/1.15 var(--sans); }
+  .hand .name { font: 700 12px var(--mono); letter-spacing: .08em; }
+  .hand .tag { font-size: 10px; color: var(--muted); letter-spacing: .12em; }
+  .hand.pending .glyph, .hand.pending .name { opacity: .3; }
+  .hand.you .glyph { color: var(--pink); }
+  .vs { display: grid; place-items: center; font: 700 11px var(--mono); color: var(--muted); letter-spacing: .1em; }
 
-  .verdict { font-size: 27px; font-weight: 700; margin-top: 12px; }
-  .verdict.user { color: var(--win); }
-  .verdict.jev { color: var(--lose); }
-  .verdict.tie { color: var(--tie); }
+  .verdict { font: 700 26px/1.3 var(--sans); margin-top: 12px; letter-spacing: -.01em; }
+  .verdict.user { color: var(--pink); }
+  .verdict.jev { color: var(--ink); }
+  .verdict.tie { color: var(--muted); }
 
-  .spinner {
-    display: inline-block; width: 13px; height: 13px; border-radius: 50%; margin-right: 8px;
-    border: 2px solid rgba(255,209,102,.25); border-top-color: var(--accent);
-    animation: spin .7s linear infinite; vertical-align: -2px;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { display: inline-block; width: 9px; height: 9px; margin-right: 7px; vertical-align: 0;
+             background: var(--pink); animation: blink .62s steps(2, end) infinite; }
+  @keyframes blink { 50% { opacity: .15; } }
 
-  /* ---------- 麦克风 ---------- */
-  .mic { display: flex; align-items: center; gap: 11px; margin-top: 18px; }
-  .bars { display: flex; align-items: flex-end; gap: 3px; height: 26px; }
-  .bars i {
-    width: 4px; border-radius: 2px; background: var(--dimmer); height: 4px;
-    transition: height .07s linear, background .2s;
-  }
-  .bars.live i { background: var(--accent); }
-  .mic .label { font-size: 12px; color: var(--dim); }
+  /* ---------------- 麦克风 ---------------- */
+  .mic { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+  .bars { display: flex; align-items: flex-end; gap: 2px; height: 22px; }
+  .bars i { width: 3px; height: 3px; background: var(--face-low); transition: height .06s linear, background .15s; }
+  .bars.live i { background: var(--pink); }
+  .bars.rec i { background: var(--pink); }
+  .mic .label { font-size: 11.5px; color: var(--muted); }
+  .mic .label b { color: var(--ink); }
+  .rec-dot { width: 8px; height: 8px; background: var(--face-low); box-shadow: inset -1px -1px 0 0 var(--bev-lo), inset 1px 1px 0 0 var(--bev-hi); }
+  .rec-dot.on { background: var(--pink); }
 
-  .transcript {
-    margin-top: 10px; font-size: 13px; color: var(--dim); min-height: 20px;
-    max-width: 460px; word-break: break-word;
-  }
-  .transcript b { color: var(--accent); }
+  .transcript { margin-top: 9px; font-size: 12px; color: var(--muted); min-height: 18px; max-width: 470px; word-break: break-word; }
+  .transcript b { color: var(--ink); }
 
-  /* ---------- 出拳按钮 ---------- */
-  .controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 16px; }
+  /* ---------------- 按钮 ---------------- */
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 16px; }
   button {
-    font: inherit; color: var(--ink); background: rgba(255,255,255,.055);
-    border: 1px solid var(--line); border-radius: 11px; padding: 10px 17px;
-    cursor: pointer; transition: background .15s, transform .06s, border-color .15s;
+    font: 400 12.5px var(--mono); color: var(--ink); background: var(--face);
+    border: 0; padding: 7px 15px; cursor: pointer;
+    box-shadow: inset -1px -1px 0 0 var(--bev-lo), inset 1px 1px 0 0 var(--bev-hi),
+                inset -2px -2px 0 0 var(--bev-lo2), inset 2px 2px 0 0 var(--bev-hi2);
   }
-  button:hover:not(:disabled) { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.2); }
-  button:active:not(:disabled) { transform: translateY(1px); }
-  button:disabled { opacity: .34; cursor: not-allowed; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #201a08; font-weight: 650; }
-  button.primary:hover:not(:disabled) { background: #ffdc86; }
-  button.throw { min-width: 92px; font-size: 15px; }
-  button.throw .g { display: block; font-size: 25px; line-height: 1.25; }
-  button.ghost { background: transparent; }
+  button:hover:not(:disabled) { background: var(--field); }
+  button:active:not(:disabled) {
+    padding: 8px 14px 6px 16px;
+    box-shadow: inset 1px 1px 0 0 var(--bev-lo2), inset -1px -1px 0 0 var(--bev-hi),
+                inset 2px 2px 0 0 var(--bev-lo), inset -2px -2px 0 0 var(--bev-hi2);
+  }
+  button:focus-visible { outline: 1px dotted var(--ink); outline-offset: -5px; }
+  button:disabled { color: var(--muted); cursor: default; }
+  button:disabled .g { opacity: .4; }
+  button.primary { background: var(--ink); color: var(--paper); }
+  button.primary:hover:not(:disabled) { background: #000; color: #fff; }
+  @media (prefers-color-scheme: dark) { button.primary:hover:not(:disabled) { background: #fff; color: #000; } }
+  button.throw { min-width: 78px; line-height: 1.25; }
+  button.throw .g { display: block; font: 700 17px var(--sans); color: var(--pink); }
+  .mute { margin-left: 8px; padding: 5px 9px; font-size: 11px; }
+  .sky .mute { box-shadow: inset -1px -1px 0 0 var(--bev-lo), inset 1px 1px 0 0 var(--bev-hi); }
 
-  /* ---------- Jev 面板 ---------- */
-  .bars-row { display: grid; gap: 8px; margin-bottom: 14px; }
-  .bar-row { display: grid; grid-template-columns: 52px 1fr 46px; align-items: center; gap: 9px; font-size: 13px; }
-  .bar-row .k { color: var(--dim); }
-  .bar-row .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
-  .track { height: 8px; background: rgba(255,255,255,.07); border-radius: 5px; overflow: hidden; }
-  .track span { display: block; height: 100%; background: var(--jev); border-radius: 5px; transition: width .35s ease; }
-  .track.best span { background: var(--accent); }
+  /* ---------------- Jev 面板 ---------------- */
+  .bar-row { display: grid; grid-template-columns: 44px 1fr 42px; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 7px; }
+  .bar-row .k { color: var(--muted); }
+  .bar-row .v { text-align: right; font-variant-numeric: tabular-nums; }
+  .track { height: 11px; background: var(--field); position: relative;
+           box-shadow: inset 1px 1px 0 0 var(--bev-lo2), inset -1px -1px 0 0 var(--bev-hi); }
+  .track span { display: block; height: 100%; background: var(--ink); transition: width .3s steps(9, end); }
+  .track.best span { background: var(--pink); }
 
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 13px; }
-  .kv dt { color: var(--dim); }
-  .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
-  .note { font-size: 12px; color: var(--dimmer); line-height: 1.65; margin-top: 12px; }
-  .note b { color: var(--dim); font-weight: 600; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12px; margin: 12px 0 0; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .note { font-size: 11.5px; color: var(--muted); line-height: 1.7; margin-top: 10px; }
+  .note b { color: var(--ink); }
 
-  details { margin-top: 13px; }
-  summary { cursor: pointer; font-size: 12px; color: var(--dim); }
+  details { margin-top: 11px; }
+  summary { cursor: pointer; font-size: 11.5px; color: var(--muted); }
   summary:hover { color: var(--ink); }
-  pre {
-    background: rgba(0,0,0,.32); border: 1px solid var(--line); border-radius: 10px;
-    padding: 12px; font-size: 12px; line-height: 1.65; overflow: auto; max-height: 260px;
-    white-space: pre-wrap; word-break: break-word; color: #c8d2e0; margin: 9px 0 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
+  pre { background: var(--field); padding: 10px; margin: 8px 0 0; font: 11.5px/1.7 var(--mono);
+        max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+        box-shadow: inset 1px 1px 0 0 var(--bev-lo2), inset -1px -1px 0 0 var(--bev-hi); }
 
-  /* ---------- 记忆 ---------- */
-  .memory { display: grid; gap: 6px; max-height: 300px; overflow: auto; }
-  .mem-row {
-    display: grid; grid-template-columns: 34px 1fr 1fr 60px; gap: 9px; align-items: center;
-    font-size: 13px; padding: 7px 10px; border-radius: 9px; background: rgba(255,255,255,.03);
-  }
-  .mem-row .idx { color: var(--dimmer); font-variant-numeric: tabular-nums; }
-  .mem-row .u { color: var(--you); }
-  .mem-row .j { color: var(--jev); }
-  .mem-row .r { text-align: right; font-size: 12px; }
-  .mem-row .r.user { color: var(--win); }
-  .mem-row .r.jev { color: var(--lose); }
-  .mem-row .r.tie { color: var(--tie); }
-  .empty { color: var(--dimmer); font-size: 13px; padding: 12px 2px; }
+  /* ---------------- 记忆 ---------------- */
+  .memory { display: grid; gap: 5px; max-height: 292px; overflow: auto; }
+  .mem-row { display: grid; grid-template-columns: 24px 1fr 1fr 56px; gap: 8px; align-items: center;
+             font-size: 12px; padding: 5px 8px; background: var(--field);
+             box-shadow: inset 1px 1px 0 0 var(--bev-lo2), inset -1px -1px 0 0 var(--bev-hi); }
+  .mem-row .idx { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .mem-row .u { color: var(--pink); font-weight: 700; }
+  .mem-row .j { font-weight: 700; }
+  .mem-row .r { text-align: right; font-size: 11px; color: var(--muted); }
+  .mem-row .r.user { color: var(--pink); }
+  .mem-row .r.jev { color: var(--ink); }
+  .empty { color: var(--muted); font-size: 12px; padding: 8px 2px; }
 
-  .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; }
-  .status-dot.ok { background: var(--win); }
-  .status-dot.off { background: var(--lose); }
-  .status-dot.warn { background: var(--accent); }
-  .banner {
-    border-radius: 11px; padding: 10px 13px; font-size: 13px; margin-bottom: 14px;
-    border: 1px solid var(--line); background: rgba(255,209,102,.07); color: #f0d9a0;
-    line-height: 1.6;
-  }
-  .banner.err { background: rgba(242,85,90,.1); border-color: rgba(242,85,90,.35); color: #f6b3b5; }
-  .foot { margin-top: 16px; font-size: 12px; color: var(--dimmer); line-height: 1.8; }
-  .foot code {
-    background: rgba(255,255,255,.06); border-radius: 5px; padding: 1px 6px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
-  }
+  /* ---------------- 提示条 ---------------- */
+  .banner { margin-bottom: 14px; padding: 9px 12px; font-size: 12px; line-height: 1.65;
+            background: var(--face); box-shadow: inset -1px -1px 0 0 var(--bev-lo), inset 1px 1px 0 0 var(--bev-hi),
+                        inset -2px -2px 0 0 var(--bev-lo2), inset 2px 2px 0 0 var(--bev-hi2); }
+  .banner.err { background: var(--pink); color: #1E1E1E; }
+  .foot { margin-top: 16px; font-size: 11.5px; color: var(--muted); line-height: 1.9; }
+  .foot code { background: var(--face); padding: 1px 5px; }
+  .status-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; background: var(--face-low); }
+  .status-dot.ok { background: var(--pink); }
+  .status-dot.off { background: var(--bev-lo2); }
+  .status-dot.warn { background: var(--ink); }
 </style>
 </head>
 <body>
-<div class="app">
-  <header>
-    <h1>石头剪刀布 <small>对 Jev</small></h1>
+<div class="sky">
+  <canvas id="sky" aria-hidden="true"></canvas>
+  <div class="sky-inner">
+    <h1>石头剪刀布<span>对 Jev</span></h1>
     <div class="scoreboard">
-      <div class="score-chip you"><div class="who">你</div><div class="n" id="score-you">0</div></div>
-      <div class="score-chip tie"><div class="who">平</div><div class="n" id="score-tie">0</div></div>
-      <div class="score-chip jev"><div class="who">JEV</div><div class="n" id="score-jev">0</div></div>
-      <div class="score-chip"><div class="who">回合</div><div class="n" id="round-count">0</div></div>
+      <div class="chip you"><b id="score-you">0</b><span>你</span></div>
+      <div class="chip"><b id="score-tie">0</b><span>平</span></div>
+      <div class="chip"><b id="score-jev">0</b><span>JEV</span></div>
+      <div class="chip"><b id="round-count">0</b><span>回合</span></div>
+      <button class="mute" id="btn-mute" title="倒计时音效">♪ 开</button>
     </div>
-  </header>
+  </div>
+</div>
 
+<div class="app">
   <div id="banner"></div>
-
   <div class="grid">
-    <!-- 左：牌桌 -->
-    <section class="card">
-      <div class="stage">
-        <div id="stage-main"></div>
+    <section class="win">
+      <div class="titlebar"><span class="tb-text">石头剪刀布 — PLAY.EXE</span><span class="tb-ctrls"><i>_</i><i>□</i><i>×</i></span></div>
+      <div class="win-body">
+        <div class="stage" id="stage-main"></div>
         <div class="mic">
+          <span class="rec-dot" id="rec-dot"></span>
           <div class="bars" id="mic-bars"></div>
           <span class="label" id="mic-label">麦克风未启动</span>
         </div>
@@ -212,22 +263,22 @@
       </div>
     </section>
 
-    <!-- 右：Jev -->
-    <div style="display:grid; gap:16px;">
-      <section class="card">
-        <h2>Jev 的判断</h2>
-        <div id="jev-panel"></div>
+    <div class="col">
+      <section class="win">
+        <div class="titlebar"><span class="tb-text">JEV 的判断 — JEVDECIDE.EXE</span><span class="tb-ctrls"><i>_</i><i>□</i><i>×</i></span></div>
+        <div class="win-body" id="jev-panel"></div>
       </section>
-      <section class="card">
-        <h2>Memory · 它看到的历史</h2>
-        <div class="memory" id="memory"></div>
-        <div class="controls" style="justify-content:flex-start; margin-top:14px;">
-          <button id="btn-new-session" class="ghost">再来一个回合 · 清空历史</button>
+      <section class="win">
+        <div class="titlebar"><span class="tb-text">MEMORY — STATE.TXT</span><span class="tb-ctrls"><i>_</i><i>□</i><i>×</i></span></div>
+        <div class="win-body">
+          <div class="memory" id="memory"></div>
+          <div class="controls" style="justify-content:flex-start; margin-top:12px;">
+            <button id="btn-new-session">再来一个回合 · 清空历史</button>
+          </div>
         </div>
       </section>
     </div>
   </div>
-
   <div class="foot" id="foot"></div>
 </div>
 
@@ -238,7 +289,6 @@
   // ---------------------------------------------------------------- 规则
   const THROWS = ["rock", "paper", "scissors"];
   const LABEL = { rock: "石头", paper: "布", scissors: "剪刀" };
-  const GLYPH = { rock: "✊", paper: "✋", scissors: "✌️" };
   const BEATS = { rock: "scissors", paper: "rock", scissors: "paper" };
   const LOSES_TO = { rock: "paper", paper: "scissors", scissors: "rock" };
   const OUTCOME_LABEL = { user: "你赢了", jev: "Jev 赢了", tie: "平局" };
@@ -265,6 +315,51 @@
     micReady: false,
     netError: null,
   };
+
+  // ---------------------------------------------------------------- 音效
+  // 倒计时的滴答声。用 Web Audio 现场合成，不加载任何音频文件 —— 这个页面
+  // 至今是零外部依赖的，为三声「嘀」破例去放一个 mp3 不划算。
+  const sfx = (() => {
+    let ctxAudio = null;
+    let muted = false;
+    function ensure() {
+      if (muted) return null;
+      if (!ctxAudio) {
+        const Ctor = window.AudioContext || window.webkitAudioContext;
+        if (!Ctor) return null;
+        try { ctxAudio = new Ctor(); } catch (e) { return null; }
+      }
+      // 浏览器要求先有一次用户手势，否则 AudioContext 是 suspended 的。
+      if (ctxAudio.state === "suspended") ctxAudio.resume().catch(() => {});
+      return ctxAudio;
+    }
+    function beep(freq, ms, gain, type, to) {
+      const ac = ensure();
+      if (!ac) return;
+      const t = ac.currentTime;
+      const osc = ac.createOscillator();
+      const amp = ac.createGain();
+      osc.type = type || "square";
+      osc.frequency.setValueAtTime(freq, t);
+      if (to) osc.frequency.linearRampToValueAtTime(to, t + ms / 1000);
+      amp.gain.setValueAtTime(gain, t);
+      amp.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
+      osc.connect(amp); amp.connect(ac.destination);
+      osc.start(t); osc.stop(t + ms / 1000 + 0.02);
+    }
+    return {
+      unlock() { ensure(); },
+      isMuted() { return muted; },
+      toggle() { muted = !muted; if (!muted) ensure(); return muted; },
+      // 3 / 2 / 1：短促清脆的一声。
+      tick() { beep(1046, 70, 0.05, "square"); },
+      // 数到 0：低一点、长一点，给个「开始」的感觉。
+      go() { beep(523, 190, 0.06, "square", 784); },
+      win() { beep(659, 110, 0.055, "triangle"); setTimeout(() => beep(988, 190, 0.055, "triangle"), 110); },
+      lose() { beep(330, 130, 0.055, "triangle"); setTimeout(() => beep(208, 240, 0.055, "triangle"), 130); },
+      tie() { beep(440, 170, 0.05, "triangle"); },
+    };
+  })();
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) =>
@@ -299,8 +394,7 @@
   function handHTML(side, throwName, tag) {
     const pending = !throwName;
     return '<div class="hand ' + side + (pending ? " pending" : "") + '">' +
-      '<div class="glyph">' + (throwName ? GLYPH[throwName] : "❔") + "</div>" +
-      '<div class="name">' + (throwName ? LABEL[throwName] : "…") + "</div>" +
+      '<div class="glyph">' + (throwName ? LABEL[throwName] : "???") + "</div>" +
       '<div class="tag">' + esc(tag) + "</div></div>";
   }
 
@@ -434,8 +528,8 @@
     el.innerHTML = state.history.map((r, i) =>
       '<div class="mem-row">' +
         '<span class="idx">' + (i + 1) + "</span>" +
-        '<span class="u">' + GLYPH[r.user] + " " + LABEL[r.user] + "</span>" +
-        '<span class="j">' + GLYPH[r.jev] + " " + LABEL[r.jev] + "</span>" +
+        '<span class="u">' + LABEL[r.user] + "</span>" +
+        '<span class="j">' + LABEL[r.jev] + "</span>" +
         '<span class="r ' + r.result + '">' + OUTCOME_LABEL[r.result] + "</span>" +
       "</div>").join("");
   }
@@ -458,7 +552,7 @@
       '<button class="primary" id="btn-start"' + (canStart ? "" : " disabled") + ">开始</button>" +
       THROWS.map((thr) =>
         '<button class="throw" data-throw="' + thr + '"' + (canThrow ? "" : " disabled") + ">" +
-        '<span class="g">' + GLYPH[thr] + "</span>" + LABEL[thr] + "</button>").join("");
+        '<span class="g">' + LABEL[thr] + "</span></button>").join("");
 
     $("btn-start").onclick = startCountdown;
     el.querySelectorAll("[data-throw]").forEach((b) => {
@@ -497,15 +591,18 @@
     state.jevPending = true;
     state.transcript = "";
     render();
+    sfx.tick();                       // 「3」
 
     askJev();                        // 和倒计时并排跑，别让它拖后腿
     const timer = setInterval(() => {
       state.count -= 1;
       if (state.count > 0) {
+        sfx.tick();                   // 「2」「1」
         renderStage();
         return;
       }
       clearInterval(timer);
+      sfx.go();                       // 数到 0
       state.phase = "waiting";
       render();
       maybeFinish();
@@ -586,11 +683,11 @@
     }
     if (!state.jev) return;
 
-    state.history.push({
-      user: state.userThrow,
-      jev: state.jev.throw,
-      result: outcome(state.userThrow, state.jev.throw),
-    });
+    const result = outcome(state.userThrow, state.jev.throw);
+    state.history.push({ user: state.userThrow, jev: state.jev.throw, result });
+    if (result === "user") sfx.win();
+    else if (result === "jev") sfx.lose();
+    else sfx.tie();
     state.phase = "reveal";
     render();
     setTimeout(() => {
@@ -619,26 +716,6 @@
     state.phase = "waiting";
     render();
     askJev();
-  }
-
-  // ---------------------------------------------------------------- 语音
-  function interpret(text) {
-    fetch("/api/interpret", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    })
-      .then((r) => r.json())
-      .then((parsed) => {
-        if (parsed.command === "new_session") return newSession();
-        if (parsed.command === "start") {
-          // 结算画面里说「开始」也认，不用干等那 2.6 秒。
-          if (state.phase === "reveal") state.phase = "idle";
-          if (state.phase === "idle") return startCountdown();
-        }
-        if (parsed.throw) submitThrow(parsed.throw);
-      })
-      .catch(() => {});
   }
 
   // ---------------------------------------------------------------- 语音
@@ -727,8 +804,28 @@
 
   // 服务器端识别：靠音量做端点检测，把「一段话」切出来发走。
   // 这样不用等固定时长，也不用手动按开始/结束。
-  const VAD = { level: 0.05, silenceMs: 700, maxMs: 6000, minMs: 250 };
+  // 端点检测。核心规则：**一听到停顿就停止录音**，把这一段发去识别。
+  // 阈值不是写死的音量，而是跟着房间的本底噪声走 —— 固定阈值在安静的房间里
+  // 太迟钝（等不到停顿），在吵的房间里有等于没有（永远等不到停顿，只能录满 maxMs）。
+  const VAD = {
+    floorMin: 0.010,   // 极安静房间的绝对下限
+    floorMax: 0.050,   // 本底最多抬到这里，否则门槛会高到没人够得着
+    ratio: 2.4,        // 高出本底这么多倍才算说话
+    startMs: 80,       // 连续这么久才算真的开口，挡掉一声咳嗽
+    silenceMs: 520,    // 「停顿」的定义：静这么久就停止录音
+    maxMs: 8000,       // 一直不停，最多也就录这么久
+    minMs: 260,        // 比这还短的片段不值得发出去
+  };
   let serverAsrArmed = false;
+
+  function setRecState(text, recording) {
+    const label = $("mic-label");
+    if (label && text) label.innerHTML = text;
+    const dot = $("rec-dot");
+    if (dot) dot.classList.toggle("on", !!recording);
+    const bars = $("mic-bars");
+    if (bars) bars.classList.toggle("rec", !!recording);
+  }
 
   function armServerAsr() {
     // 麦克风流和 /api/health 谁先到不确定，所以两边都来叫一次，谁最后到谁把它装上。
@@ -742,6 +839,11 @@
     const ext = mime.indexOf("ogg") >= 0 ? "ogg" : "webm";
 
     let recorder = null, chunks = [], startedAt = 0, lastLoud = 0, speaking = false;
+    let candidate = 0;
+    // 本底噪声用不对称的滑动平均跟：房间安静下来时立刻跟下去，变吵时抬得极慢。
+    // 对称的均值会被一声咳嗽、一次键盘、一个关门声顶上去，门槛就再也降不回来 ——
+    // 那正是这个功能最怕的：人喊了「石头剪刀布」，它却听不见。
+    let noiseFloor = 0.006;
 
     const begin = () => {
       try { recorder = new MediaRecorder(audioStream, mime ? { mimeType: mime } : undefined); }
@@ -765,21 +867,37 @@
       startedAt = performance.now();
       recorder.start();
       speaking = true;
+      setRecState("录音中…", true);
     };
 
     const end = () => {
       speaking = false;
+      candidate = 0;
       if (recorder && recorder.state === "recording") recorder.stop();
       recorder = null;
+      setRecState("听到停顿，已停止录音", false);
     };
 
     window.__ispVad = (rms) => {
-      if (state.asr !== "server") return;        // 浏览器识别能用时，别去抢麦克风
       const now = performance.now();
-      const loud = rms > VAD.level;
-      if (loud) lastLoud = now;
-      if (!speaking && loud) begin();
-      else if (speaking && (now - lastLoud > VAD.silenceMs || now - startedAt > VAD.maxMs)) end();
+      // 只在没说话的时候更新本底，否则人声会一路把门槛顶上去。
+      if (!speaking) {
+        noiseFloor = rms < noiseFloor
+          ? noiseFloor * 0.70 + rms * 0.30        // 安静下来：跟着降
+          : noiseFloor + (rms - noiseFloor) * 0.006;  // 变吵：每帧只挪一点点
+        noiseFloor = Math.max(0.002, Math.min(VAD.floorMax, noiseFloor));
+      }
+      if (state.asr !== "server") return;        // 浏览器识别能用时，别去抢麦克风
+
+      const threshold = Math.max(VAD.floorMin, noiseFloor * VAD.ratio);
+      if (rms > threshold) {
+        if (!candidate) candidate = now;
+        lastLoud = now;
+        if (!speaking && now - candidate >= VAD.startMs) begin();
+      } else {
+        candidate = 0;
+      }
+      if (speaking && (now - lastLoud > VAD.silenceMs || now - startedAt > VAD.maxMs)) end();
     };
   }
 
@@ -797,7 +915,7 @@
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioStream = stream;
       state.micReady = true;
-      $("mic-label").textContent = "正在录音";
+      setRecState(serverAsrReady ? "麦克风已就绪 · 说「开始」" : "麦克风已就绪", false);
       bars.classList.add("live");
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const analyser = ctx.createAnalyser();
@@ -824,8 +942,66 @@
     }
   }
 
+  // ---------------------------------------------------------------- 天空条
+  // typesafe.ai 那条粉色半调点阵：用疏密不一的圆点画出渐变的「天空」。
+  // 圆点半径取覆盖度的平方根，面积才和覆盖度成正比 —— 直接按半径线性缩放
+  // 画出来是一块一块的圆，不是渐变。
+  function drawSky() {
+    const canvas = $("sky");
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // 从天空条自己身上取色：它就地钉住了一套不随主题变的变量。
+    const vars = getComputedStyle(canvas.parentElement || document.documentElement);
+    ctx.fillStyle = (vars.getPropertyValue("--pink") || "#F386A1").trim();
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    ctx.fillStyle = (vars.getPropertyValue("--ink") || "#1E1E1E").trim();
+
+    const cell = 4;
+    const cols = Math.ceil(rect.width / cell) + 1;
+    const rows = Math.ceil(rect.height / cell) + 1;
+    for (let j = 0; j < rows; j++) {
+      for (let i = 0; i < cols; i++) {
+        const u = i / Math.max(1, cols - 1);
+        const v = j / Math.max(1, rows - 1);          // 0 顶 → 1 底
+        // 点阵压在条子下半边，往上是稀疏的浮尘 —— 参考里那片「云」就是这么堆的，
+        // 顺带把左上角留干净：标题压在密点上是读不出来的。
+        const clouds = 0.5 + 0.5 * Math.sin(u * 6.1 + 0.6) * Math.sin(u * 2.3 + 2.1 + v * 1.4);
+        const ripple = 0.5 + 0.5 * Math.sin(u * 17 + v * 3);
+        // 云的边界得是波浪形的：一条笔直的水平线看着像切了一刀，不像「云堤」。
+        const edge = 0.62 - clouds * 0.22 + ripple * 0.04;
+        const bank = Math.pow(Math.max(0, (v - edge) / 0.36), 1.4) * 0.95;
+        const amount = Math.max(0, Math.min(1,
+          bank + clouds * 0.20 * v + ripple * 0.05 + 0.05 - 0.06));
+        if (amount <= 0.02) continue;
+        const r = Math.sqrt(amount) * cell * 0.62;
+        if (r < 0.30) continue;
+        ctx.beginPath();
+        ctx.arc(i * cell + cell / 2, j * cell + cell / 2, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  drawSky();
+  addEventListener("resize", drawSky);
+
   // ---------------------------------------------------------------- 启动
   $("btn-new-session").onclick = newSession;
+
+  // 音效要等一次用户手势才解得开（浏览器自动播放策略）。
+  const muteBtn = $("btn-mute");
+  muteBtn.onclick = () => {
+    const muted = sfx.toggle();
+    muteBtn.textContent = muted ? "♪ 关" : "♪ 开";
+  };
+  ["pointerdown", "keydown"].forEach((ev) =>
+    addEventListener(ev, () => sfx.unlock(), { once: true }));
   // 先问服务器认不认语音，再决定走哪条路；两条都不通就只剩按钮。
   fetch("/api/health")
     .then((r) => r.json())
