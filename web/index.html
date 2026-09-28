@@ -106,6 +106,15 @@
     box-shadow: inset -1px -1px 0 0 var(--bev-lo), inset 1px 1px 0 0 var(--bev-hi);
   }
   .win-body { padding: 12px; }
+  /* 「JEV 的判断」这个窗口默认收着：只留标题栏，点标题栏（或那个 `_`）展开。
+     收的是窗口，不是里面那个 fold —— 里面的概率和 state 原文是第二层折叠。 */
+  .win.collapsed .win-body { display: none; }
+  .titlebar.toggle { cursor: pointer; }
+  .titlebar.toggle:focus-visible { outline: 2px solid var(--pink); outline-offset: -2px; }
+  /* 收起来时那个 `_` 是摁下去的样子，和真的最小化按钮一样 */
+  .win.collapsed .titlebar .tb-min {
+    box-shadow: inset 1px 1px 0 0 var(--bev-lo2), inset -1px -1px 0 0 var(--bev-hi);
+  }
 
   /* ---------------- 牌桌 ---------------- */
   .stage {
@@ -340,8 +349,12 @@
     </section>
 
     <div class="col">
-      <section class="win">
-        <div class="titlebar"><span class="tb-text">JEV 的判断 — JEVDECIDE.EXE</span><span class="tb-ctrls"><i>_</i><i>□</i><i>×</i></span></div>
+      <section class="win collapsed" id="jev-win">
+        <div class="titlebar toggle" id="jev-titlebar" role="button" tabindex="0"
+             aria-expanded="false" aria-controls="jev-panel" title="展开 / 收起 Jev 的判断">
+          <span class="tb-text">JEV 的判断 — JEVDECIDE.EXE</span>
+          <span class="tb-ctrls"><i class="tb-min">_</i><i>□</i><i>×</i></span>
+        </div>
         <div class="win-body" id="jev-panel"></div>
       </section>
       <section class="win">
@@ -385,7 +398,8 @@
     jevPending: false,
     jevStarted: 0,
     goAt: 0,                // 「出拳！」那一下是什么时候画的
-    jevOpen: false,         // 用户自己拉开过「Jev 的判断」没有
+    jevPanelOpen: false,    // 「JEV 的判断」这个窗口自己展开过没有（默认收着）
+    jevFoldOpen: false,     // 窗口里那个「每手的概率…」fold 拉开过没有
     lagMs: 0,               // 这一次倒计时为声音让出的延迟
     deadline: 30,
     transcript: "",
@@ -662,7 +676,7 @@
           '<span class="p">' + pct(d.probabilities[order[0]]) + "%</span>" +
         '<span class="k">它出</span><b class="thr">' + LABEL[d.throw] + "</b><span></span>" +
       "</div>" +
-      '<details class="fold" id="jev-fold"' + (state.jevOpen ? " open" : "") + ">" +
+      '<details class="fold" id="jev-fold"' + (state.jevFoldOpen ? " open" : "") + ">" +
         "<summary>每手的概率 · 期望净胜分 · 它收到的 state 原文</summary>" +
         '<div class="fold-body">' +
           '<div class="bars-row">' + rows + "</div>" +
@@ -683,9 +697,18 @@
         (d.usage ? " · " + d.usage.input_tokens + " in / " + d.usage.output_tokens + " out" : "") +
       "</div>";
 
-    // 重画的时候用 state.jevOpen 记住用户自己拉开过没有，别替他关上。
+    // 重画的时候用 state.jevFoldOpen 记住用户自己拉开过没有，别替他关上。
     const fold = $("jev-fold");
-    if (fold) fold.addEventListener("toggle", () => { state.jevOpen = fold.open; });
+    if (fold) fold.addEventListener("toggle", () => { state.jevFoldOpen = fold.open; });
+  }
+
+  // 展开 / 收起整个「JEV 的判断」窗口。默认收着 —— 一局里真正要在牌桌上看的东西
+  // （谁出了什么、谁赢了）都在牌桌上，这个窗口是给想深究的人留的。
+  // 收放只记在 state 里：重画牌桌不会把它弹回去。
+  function setJevPanelOpen(open) {
+    state.jevPanelOpen = open;
+    $("jev-win").classList.toggle("collapsed", !open);
+    $("jev-titlebar").setAttribute("aria-expanded", String(open));
   }
 
   function renderMemory() {
@@ -1191,6 +1214,17 @@
 
   // ---------------------------------------------------------------- 启动
   $("btn-new-session").onclick = newSession;
+
+  // 标题栏（连同那个 `_`）就是开关。
+  const jevBar = $("jev-titlebar");
+  jevBar.onclick = () => setJevPanelOpen(!state.jevPanelOpen);
+  jevBar.onkeydown = (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      jevBar.click();
+    }
+  };
+  setJevPanelOpen(false);
 
   // 音效要等一次用户手势才解得开（浏览器自动播放策略）。
   const muteBtn = $("btn-mute");
